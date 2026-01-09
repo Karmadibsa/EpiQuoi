@@ -1,13 +1,16 @@
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/chat';
 
-export const sendMessage = async (text) => {
+export const sendMessage = async (text, history = []) => {
     try {
         const response = await fetch(API_URL, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
             },
-            body: JSON.stringify({ message: text }),
+            body: JSON.stringify({
+                message: text,
+                history: history
+            }),
         });
 
         if (!response.ok) {

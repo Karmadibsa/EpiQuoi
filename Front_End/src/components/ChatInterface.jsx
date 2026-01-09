@@ -72,7 +72,8 @@ const ChatInterface = () => {
         setIsLoading(true);
 
         try {
-            const response = await sendMessage(textToSend);
+            // On envoie l'historique actuel avec le nouveau message
+            const response = await sendMessage(textToSend, messages);
             const botMessage = { ...response, id: Date.now() + 1 };
             setMessages(prev => [...prev, botMessage]);
         } catch (error) {
@@ -144,7 +145,13 @@ const ChatInterface = () => {
                         {isLoading && (
                             <div className="flex justify-start w-full animate-pulse">
                                 <div className="font-heading text-2xl text-slate-300 uppercase tracking-widest flex items-center gap-2">
-                                    TYPING<span className="text-epitech-green animate-bounce">_</span>
+                                    {(() => {
+                                        const lastMsg = messages[messages.length - 1];
+                                        const text = lastMsg ? lastMsg.text.toLowerCase() : "";
+                                        const isScraping = text.includes("news") || text.includes("actu") || text.includes("nouveauté");
+                                        return isScraping ? "SEARCHING_WEB" : "TYPING";
+                                    })()}
+                                    <span className="text-epitech-green animate-bounce">_</span>
                                 </div>
                             </div>
                         )}
