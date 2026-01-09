@@ -1,34 +1,58 @@
 # EpiQuoi
 
-EpiQuoi is a chat application designed for Epitech students, featuring a modern, responsive interface and AI integration.
+EpiQuoi est une application de chat conçue pour les étudiants d'Epitech, dotée d'une interface moderne ressemblant et intégrant une intelligence artificielle locale (Ollama).
 
-## Project Structure
+## Structure du Projet
 
-The project is organized into the following modules:
+Le projet est organisé en trois modules principaux :
 
-- **Front_End/**: The React-based frontend application (formerly `epiquoi`).
-- **Back_end/**: The backend server handling API requests and business logic.
-- **MCP_Server/**: The Model Context Protocol (MCP) server for local LLM integration unique to this project.
+- **Front_End/** : L'application React (Vite) pour l'interface utilisateur.
+- **Back_end/** : Le serveur Python (FastAPI) qui gère la logique et la communication avec l'IA.
+- **MCP_Server/** : Le serveur MCP (Model Context Protocol) pour donner des outils à l'IA (Scraping, etc.) - *En cours de développement*.
 
-## Getting Started
+## Guide de Démarrage
 
-### Front End
+### Pré-requis
 
-To run the frontend:
+1.  Avoir **Node.js** installé (pour le frontend).
+2.  Avoir **Python 3.10+** associé (pour le backend).
+3.  Avoir **Ollama** installé et le modèle Mistral téléchargé (`ollama pull mistral`).
 
-1. Navigate to the `Front_End` directory:
-   ```bash
-   cd Front_End
-   ```
-2. Install dependencies (if not already installed):
-   ```bash
-   npm install
-   ```
-3. Start the development server:
-   ```bash
-   npm run dev
-   ```
+### 1. Lancer le Front-End (Interface)
 
-### Back End & MCP Server
+Dans un premier terminal :
 
-*Documentation for backend and MCP server setup will be added as development progresses.*
+```bash
+cd Front_End
+npm install
+npm run dev
+```
+
+L'application sera accessible sur `http://localhost:5173`.
+
+### 2. Lancer le Back-End (Serveur IA)
+
+Dans un second terminal :
+
+```bash
+cd Back_end
+pip install -r requirements.txt
+python main.py
+```
+
+Le serveur tournera sur `http://localhost:8000`.
+
+### Configuration
+
+Le backend utilise un fichier `.env`. Assurez-vous d'avoir créé ce fichier dans le dossier `Back_end/` avec le contenu suivant :
+
+```env
+OLLAMA_MODEL=mistral
+OLLAMA_URL=http://localhost:11434
+```
+
+## Fonctionnalités Actuelles
+
+*   Chat en temps réel avec une IA locale (Mistral).
+*   Interface visuelle "Epitech Blue".
+*   Architecture prête pour le Scraping et le MCP.
