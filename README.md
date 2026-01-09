@@ -1,6 +1,6 @@
-# EpiChat
+# EpiQuoi
 
-EpiChat is a chat application designed for Epitech students, featuring a modern, responsive interface and AI integration.
+EpiQuoi is a chat application designed for Epitech students, featuring a modern, responsive interface and AI integration.
 
 ## Project Structure
 
