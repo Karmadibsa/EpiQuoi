@@ -193,15 +193,22 @@ async def chat_endpoint(request: ChatRequest):
     
     msg_lower = request.message.lower()
 
-    # Détection de langue (Basique)
+
+    # Détection de langue (Améliorée - Anti faux-positifs)
     user_lang = "fr"
+    supported_langs = {"fr", "en", "es", "de"}  # Français, Anglais, Espagnol, Allemand
+    
     try:
         from langdetect import detect
-        if len(request.message.split()) > 3: # On ne détecte que si le message est assez long
+        # Seuil plus strict : au moins 8 mots pour éviter les faux positifs ("ca a l'air" → catalan)
+        if len(request.message.split()) >= 8:
             detected = detect(request.message)
-            if detected != 'fr':
+            # Ne changer que si la langue détectée est supportée ET différente du français
+            if detected in supported_langs and detected != 'fr':
                 user_lang = detected
                 print(f"🌍 Language Detected: {user_lang}")
+            else:
+                print(f"🌍 Language Detected: {detected} (ignored, defaulting to French)")
     except ImportError:
         print("⚠️ Langdetect not installed")
     except Exception as e:
@@ -214,144 +221,135 @@ async def chat_endpoint(request: ChatRequest):
         context_extra += f"\n\n[SYSTÈME: DONNÉES LIVE INJECTÉES]\n{news_info}\nUtilise ces informations pour répondre."
         backend_source += " + Scraper"
 
-    # Tool 2: Campus Finder (Détection de Code Postal)
+    # Tool 2: Campus Finder (CORRECTION #3 - Regex améliorée + Filtrage contextuel)
     import re
     location_query = None
     
-    # 1. Regex Code Postal (5 chiffres)
-    zip_match = re.search(r'\b\d{5}\b', request.message)
-    if zip_match:
-        location_query = zip_match.group(0)
-    else:
-        # 2. Regex Ville (ex: "habite à Metz", "suis de Lyon")
-        city_match = re.search(r'(?i)(?:habite|vivre|suis|campus|ville|vers)\s+(?:à|a|de|sur)\s+([a-zA-Z\u00C0-\u00FF\s\-]+)', request.message)
-        if city_match:
-            # On prend le premier mot ou groupe de mots significatif
-            captured = city_match.group(1).strip()
-            # Nettoyage brutal: si on a "Metz j", on garde "Metz"
-            # On split sur l'espace et on garde les morceaux qui sont plus longs que 1 char (sauf "Le" etc)
-            parts = captured.split()
-            cleaned_parts = []
-            for p in parts:
-                if len(p) > 2 or p.lower() in ["le", "la", "les", "san", "los", "new"]:
-                    cleaned_parts.append(p)
-                else:
-                    break # Dès qu'on tombe sur un mot bizarre ("j", "et"), on arrête
-            
-            if cleaned_parts:
-                location_query = " ".join(cleaned_parts)
+    # SAFEGUARD : Ne pas déclencher l'outil si l'utilisateur parle juste d'Epitech en général
+    # (évite "parle moi de la méthodologie epitech" → géolocalisation)
+    non_location_keywords = ["méthodologie", "methodologie", "pédagogie", "pedagogie", "programme", 
+                             "cursus", "formation", "apprentissage", "méthode", "enseignement",
+                             "apprentissage", "étude", "cours", "diplome", "diplôme"]
+    
+    is_general_epitech_question = any(kw in msg_lower for kw in non_location_keywords)
+    
+    if not is_general_epitech_question:  # Ne chercher une localisation QUE si contexte géographique
+        # 1. Regex Code Postal (5 chiffres)
+        zip_match = re.search(r'\b\d{5}\b', request.message)
+        if zip_match:
+            location_query = zip_match.group(0)
+        else:
+            # 2. Regex Ville STRICTE (avec prépositions géographiques claires)
+            # Accepte: "habite à Lyon", "suis de Metz", "à Bordeaux", "vers Lille"
+            city_match = re.search(r'(?i)(?:habite|vis|suis|viens)\s+(?:à|a|de|d\')?\s*([a-zA-Z\u00C0-\u00FF\-]+)|(?:à|a|vers|sur)\s+([a-zA-Z\u00C0-\u00FF\-]+)', request.message)
+            if city_match:
+                # Prendre le premier groupe non-vide
+                location_query = (city_match.group(1) or city_match.group(2)).strip()
             else:
-                 location_query = parts[0] if parts else None
+                # 3. Cas spécifique : "campus [ville]" ou "Epitech [ville]" mais SEULEMENT si [ville] est connue
+                campus_city_match = re.search(r'(?i)(?:campus|epitech)\s+([a-zA-Z\u00C0-\u00FF\-]+)', request.message)
+                if campus_city_match:
+                    candidate = campus_city_match.group(1).strip()
+                    # Vérifier que c'est un nom de ville connu (pas "methodologie")
+                    if candidate.lower() in [c.lower() for c in CAMPUSES.keys()] or candidate.lower() in CITY_ALIASES:
+                        location_query = candidate
+                
+                # 4. ULTIME SECOURS : Ville connue mentionnée directement
+                if not location_query:
+                    for known_city in CAMPUSES.keys():
+                        # Check avec boundary pour éviter "Nantes" dans "enseignantes"
+                        if re.search(rf'\b{re.escape(known_city.lower())}\b', msg_lower):
+                            location_query = known_city
+                            break
+                    
+                    # 5. Check Aliases si toujours rien
+                    if not location_query:
+                        for alias, target_city in CITY_ALIASES.items():
+                            if re.search(rf'\b{re.escape(alias)}\b', msg_lower):
+                                location_query = target_city
+                                break
 
-    # Fallback: Si pas de regex location trouvée, on cherche si une ville connue (ou alias) est citée directement
-    if not location_query:
-        # Check Main Cities
-        for known_city in CAMPUSES.keys():
-             if known_city.lower() in msg_lower:
-                 location_query = known_city
-                 break
-        # Check Aliases
-        if not location_query:
-            for alias, target_city in CITY_ALIASES.items():
-                if alias in msg_lower:
-                    location_query = target_city
-                    break
-
-    direct_city_match = None
+    # CORRECTION #2 - Variables thread-safe (pas de modification de CAMPUSES global)
+    city = "Inconnu"
+    data = {}
+    dist_km = 0
+    
     if location_query:
-        # Check si la location trouvée (via regex ou fallback) est une ville campus connue
-        # On normalise pour vérifier
+        # Check si la location trouvée est un nom de ville campus exact (skip geocoding)
+        direct_city_match = None
         loc_normalized = location_query.lower()
         
-        # 1. Check direct keys
         for known_city in CAMPUSES.keys():
             if known_city.lower() == loc_normalized:
                 direct_city_match = known_city
                 break
         
-        # 2. Check aliases if not found
-        if not direct_city_match:
-            if loc_normalized in CITY_ALIASES:
-                direct_city_match = CITY_ALIASES[loc_normalized]
+        if not direct_city_match and loc_normalized in CITY_ALIASES:
+            direct_city_match = CITY_ALIASES[loc_normalized]
 
         if direct_city_match:
-             print(f"🔍 Tool Activation: Direct City Match! ({direct_city_match}) - Skipping Geocoder")
-             city = direct_city_match
-             data = CAMPUSES[city]
-             dist_km = 0
-             user_detected_info = f"{city} (Détection directe)"
-             
-             # Mock structure for direct match
-             nearest_overall = {'city': city, 'dist': 0, 'data': data}
-             nearest_in_country = nearest_overall
-             near_campus = (nearest_overall, nearest_in_country, user_detected_info) 
+            print(f"🔍 Direct City Match: {direct_city_match}")
+            city = direct_city_match
+            data = CAMPUSES[city]
+            dist_km = 0
+            
+            context_extra += (
+                f"\n\n[INFO SYSTÈME: CAMPUS PRÉSENT !]\n"
+                f"Epitech est à {city.upper()} !\n"
+                f"Adresse : {data['addr']}.\n"
+                f"Contact : {data.get('email', 'N/A')} | {data.get('phone', 'N/A')}\n"
+            )
         else:
-             print(f"🔍 Tool Activation: Geocoding API ({location_query})")
-             near_campus = await get_nearest_campus(location_query)
-             
-        if near_campus:
-            nearest_overall, nearest_in_country, user_detected_info = near_campus 
+            # Geocoding API nécessaire
+            print(f"🔍 Geocoding API: {location_query}")
+            geo_result = await get_nearest_campus(location_query)
             
-            # --- FIX: Initialization of variables used later ---
-            city = nearest_overall['city']
-            data = nearest_overall['data']
-            dist_km = nearest_overall['dist']
-            # ---------------------------------------------------
-
-            # PAR DÉFAUT : On recommande le plus proche absolu
-            rec_city = nearest_overall['city']
-            rec_data = nearest_overall['data']
-            rec_dist = nearest_overall['dist']
-            
-            # EXCEPTION GEOPOLITIQUE : Si un campus existe dans le MEME PAYS que l'user, on le priorise
-            # sauf si la différence de distance est énorme (ex: > 300km)
-            is_national_priority = False
-            if nearest_in_country and nearest_in_country['city'] != rec_city:
-                 nat_dist = nearest_in_country['dist']
-                 # On favorise le national si la distance reste raisonnable par rapport à l'absolu (ex: Absolu 120km FR vs National 140km ES -> Go ES)
-                 if nat_dist < (rec_dist + 200): 
-                      rec_city = nearest_in_country['city']
-                      rec_data = nearest_in_country['data']
-                      rec_dist = nat_dist
-                      is_national_priority = True
-
-            is_same_city = location_query.lower() in rec_city.lower() or rec_city.lower() in location_query.lower()
-
-            # SI ON EST DANS LA VILLE DU CAMPUS
-            if is_same_city or rec_dist < 10:
-                context_extra += (
-                    f"\n\n[INFO SYSTÈME: CAMPUS PRÉSENT !]\n"
-                    f"Excellente nouvelle : Epitech est PRÉSENT à {rec_city} !\n"
-                    f"Adresse : {rec_data['addr']}.\n"
-                    f"Contact : {rec_data.get('email', 'N/A')} | {rec_data.get('phone', 'N/A')}\n"
-                )
-            else:
-                 # CAS ELOIGNÉ
-                 priority_msg = "PREFERENCE NATIONALE" if is_national_priority else "PROXIMITÉ GÉOGRAPHIQUE"
-                 context_extra += (
-                    f"\n\n[INFO SYSTÈME: LOCALISATION]\n"
-                    f"L'utilisateur est à : '{location_query}' ({user_detected_info}).\n"
-                    f"Campus recommandé ({priority_msg}) : {rec_city.upper()} ({rec_dist} km).\n"
-                 )
-                 
-                 if is_national_priority:
-                     context_extra += f"Note: Le campus absolu le plus proche est {nearest_overall['city']} ({nearest_overall['dist']}km), mais il est dans un autre pays.\n"
-
-                 context_extra += (
-                    f"Propose-lui de contacter {rec_city}.\n"
-                    f"Coordonnées de {rec_city}: {rec_data['addr']}.\n"
-                    f"Contact {rec_city}: {rec_data.get('email', 'N/A')} | {rec_data.get('phone', 'N/A')}\n"
-                 )
-            
-            if not is_same_city and dist_km > 5: # Si > 5km de différence
-                 context_extra += (
-                    f"CONTEXTE GEOGRAPHIQUE : L'utilisateur se trouve à {location_query}, où il n'y a PAS de campus Epitech. "
-                    f"Le campus le plus proche est celui de {city} (à {dist_km}km). "
-                    f"Il faut donc lui proposer de contacter le campus de {city}. "
-                    f"Ne pas inventer de campus à {location_query}."
-                 )
-            
-            context_extra += f"\nInfos contact pour {city} : {data.get('email', 'N/A')} | {data.get('phone', 'N/A')}."
+            if geo_result:
+                nearest_overall, nearest_in_country, user_detected_info = geo_result
+                
+                city = nearest_overall['city']
+                data = nearest_overall['data']
+                dist_km = nearest_overall['dist']
+                
+                # Logique de recommandation (prioriser le pays si pertinent)
+                rec_city = city
+                rec_data = data
+                rec_dist = dist_km
+                is_national_priority = False
+                
+                if nearest_in_country and nearest_in_country['city'] != rec_city:
+                    nat_dist = nearest_in_country['dist']
+                    if nat_dist < (rec_dist + 200):
+                        rec_city = nearest_in_country['city']
+                        rec_data = nearest_in_country['data']
+                        rec_dist = nat_dist
+                        is_national_priority = True
+                
+                is_same_city = location_query.lower() in rec_city.lower() or rec_city.lower() in location_query.lower()
+                
+                if is_same_city or rec_dist < 10:
+                    context_extra += (
+                        f"\n\n[INFO SYSTÈME: CAMPUS PRÉSENT !]\n"
+                        f"Epitech est à {rec_city.upper()} !\n"
+                        f"Adresse : {rec_data['addr']}.\n"
+                        f"Contact : {rec_data.get('email', 'N/A')} | {rec_data.get('phone', 'N/A')}\n"
+                    )
+                else:
+                    priority_msg = "PRÉFÉRENCE NATIONALE" if is_national_priority else "PROXIMITÉ"
+                    context_extra += (
+                        f"\n\n[INFO SYSTÈME: LOCALISATION]\n"
+                        f"Localisation détectée : '{location_query}' ({user_detected_info}).\n"
+                        f"Campus recommandé ({priority_msg}) : {rec_city.upper()} ({rec_dist} km).\n"
+                        f"Adresse : {rec_data['addr']}.\n"
+                        f"Contact : {rec_data.get('email', 'N/A')} | {rec_data.get('phone', 'N/A')}\n"
+                    )
+                    
+                    if not is_same_city and rec_dist > 5:
+                        context_extra += (
+                            f"\n⚠️ GARDE-FOU : Il n'y a PAS de campus à {location_query}. "
+                            f"Le plus proche est {rec_city} ({rec_dist}km). "
+                            f"N'invente JAMAIS d'adresse pour {location_query}.\n"
+                        )
 
     # DEBUG: Voir ce qui est détecté
     if location_query:
@@ -365,6 +363,52 @@ async def chat_endpoint(request: ChatRequest):
         # LISTE OFFICIELLE POUR ANTI-HALLUCINATION
         valid_cities_str = ", ".join([c.upper() for c in CAMPUSES.keys()])
 
+        # --- DETECTION AUTOMATIQUE DU NIVEAU D'ÉTUDES ---
+        detected_level = None
+        level_keywords = {
+            "bac": ["bac ", "bac+0", "baccalauréat", "terminale", "stmg", "sti2d", "stl", "st2s", "es", "s ", "l ", "bac s", "bac es", "bac l", "bac pro", "bac techno"],
+            "bac+2": ["bac+2", "bts", "dut", "deug", "l2", "licence 2"],
+            "bac+3": ["bac+3", "licence", "bachelor", "l3", "licence 3"],
+            "bac+4": ["bac+4", "m1", "master 1", "maîtrise"],
+            "bac+5": ["bac+5", "m2", "master 2", "ingénieur", "diplôme d'ingénieur"],
+            "reconversion": ["reconversion", "changement de carrière", "réorientation", "salarié", "demandeur d'emploi"],
+            "lycee": ["lycée", "lyceen", "seconde", "première", "1ère", "2nde"]
+        }
+        
+        msg_check = msg_lower
+        for level, keywords in level_keywords.items():
+            for kw in keywords:
+                if kw in msg_check:
+                    detected_level = level
+                    print(f"🎓 Niveau d'études détecté: {level} (keyword: '{kw}')")
+                    break
+            if detected_level:
+                break
+        
+        # Construction du prompt avec info de niveau si détecté
+        level_context = ""
+        if detected_level:
+            if detected_level in ["bac", "lycee"]:
+                level_context = (
+                    "\n\n[INFO SYSTÈME: NIVEAU DÉTECTÉ = BAC/LYCÉE]\n"
+                    "L'utilisateur a mentionné avoir le BAC ou être au lycée. "
+                    "NE LUI DEMANDE PAS SON NIVEAU, tu le connais déjà ! "
+                    "Propose-lui directement le 'Programme Grande École' (5 ans, post-bac) !\n"
+                )
+            elif detected_level in ["bac+2", "bac+3"]:
+                level_context = (
+                    f"\n\n[INFO SYSTÈME: NIVEAU DÉTECTÉ = {detected_level.upper()}]\n"
+                    "L'utilisateur a un Bac+2 ou Bac+3. "
+                    "Propose-lui les 'MSc Pro' (IA, Data, Cybersécurité) ou l'Année Pré-MSc !\n"
+                )
+            elif detected_level == "reconversion":
+                level_context = (
+                    "\n\n[INFO SYSTÈME: NIVEAU DÉTECTÉ = RECONVERSION]\n"
+                    "L'utilisateur est en reconversion professionnelle. "
+                    "Propose-lui la 'Coding Academy' (bootcamp intensif) !\n"
+                )
+
+        # CORRECTION #1 - ANTI-HALLUCINATION : Injecter la liste TOUJOURS, pas seulement si l'outil est déclenché
         system_content = (
             "### RÔLE\n"
             "Tu es 'EpiQuoi', conseiller d'orientation Epitech. Ton but : Qualifier le profil de l'étudiant.\n\n"
@@ -373,36 +417,42 @@ async def chat_endpoint(request: ChatRequest):
             "DETECTE LA LANGUE DE L'UTILISATEUR (Français, Anglais, Espagnol...) ET RÉPONDS DANS LA MÊME LANGUE.\n"
             "C'est primordial pour l'expérience utilisateur.\n\n"
             
-            "### VÉRITÉ GÉOGRAPHIQUE (CRITIQUE)\n"
-            f"Voici la LISTE EXCLUSIVE des villes où Epitech a un campus : {valid_cities_str}.\n"
-            "RÈGLE D'OR : Si l'utilisateur mentionne une ville (ex: Metz, Brest, Tours...) qui n'est PAS dans cette liste :\n"
-            "1. TU DOIS DIRE qu'il n'y a pas de campus dans cette ville.\n"
-            "2. Propose toujours le campus le plus proche (selon le contexte système).\n"
-            "3. N'INVENTE JAMAIS D'ADRESSE ou de téléphone pour une ville hors liste.\n\n"
+            "### ⚠️ VÉRITÉ GÉOGRAPHIQUE - RÈGLE ABSOLUE (CRITIQUE) ⚠️\n"
+            f"LISTE EXCLUSIVE DES CAMPUS EPITECH : {valid_cities_str}.\n\n"
+            "RÈGLES IMPÉRATIVES :\n"
+            "1. Si l'utilisateur demande une adresse/infos pour une ville NON listée ci-dessus (ex: Metz, Brest, Rouen, Tours...) :\n"
+            "   → TU DOIS REFUSER. Dis clairement : 'Il n'y a pas de campus Epitech à [Ville]'.\n"
+            "   → Propose le campus le plus proche (si disponible dans le contexte système).\n"
+            "2. N'INVENTE JAMAIS d'adresse, de téléphone, ou d'email pour une ville hors liste.\n"
+            "3. Si tu n'es pas sûr, demande le code postal de l'utilisateur.\n\n"
 
-            "### PROTOCOLE DE PROFILAGE (OBLIGATOIRE)\n"
-            "1. SI TU NE CONNAIS PAS LE NIVEAU D'ÉTUDES DE L'UTILISATEUR (Lycée, Bac, Bac+2, Bac+3...) :\n"
-            "   - NE DONNE PAS LA LISTE DES CURSUS TOUT DE SUITE.\n"
-            "   - RÉPONSE TYPE : 'Avec plaisir ! Mais pour te conseiller le bon programme, dis-moi d'abord : tu es en quelle classe ou quel est ton dernier diplôme ?'\n\n"
+            "### PROTOCOLE DE PROFILAGE (CRITIQUE)\n"
+            "⚠️ AVANT DE DEMANDER LE NIVEAU D'ÉTUDES, VÉRIFIE SI L'UTILISATEUR L'A DÉJÀ MENTIONNÉ !\n"
+            "Mots-clés : 'bac', 'stmg', 'sti2d', 'licence', 'bts', 'dut', 'master', 'reconversion', 'lycée', 'terminale'...\n"
+            "SI DÉTECTÉ → Passe DIRECTEMENT aux recommandations !\n\n"
             
-            "2. UNE FOIS LE NIVEAU CONNU :\n"
-            "   - Lycée/Bac : Propose le 'Programme Grande École' (5 ans).\n"
-            "   - Bac+2/3 : Propose les 'MSc Pro' (IA, Data, Cyber) ou l'Année Pré-MSc.\n"
-            "   - Reconversion : Propose la 'Coding Academy'.\n"
-            "3. PHASE DE CONVERSION (CLOSING) :\n"
-            "   - SI l'utilisateur montre de l'intérêt ('cool', 'je veux m'inscrire', 'intéressant')...\n"
-            "   - ALORS : Incite-le FORTEMENT à prendre contact ou visiter le campus. Utilise les infos de localisation si disponibles.\n"
-            "   - Exemple : 'C'est top ! Le mieux maintenant c'est de venir voir ça en vrai. Tu peux contacter Epitech [Ville] au [Tel] ou par mail à [Email] !'\n\n"
+            "RECOMMANDATIONS PAR NIVEAU :\n"
+            "   - Lycée/Bac (STMG, STI2D, Bac Pro...) → 'Programme Grande École' (5 ans post-bac).\n"
+            "   - Bac+2/3 (BTS, DUT, Licence) → 'MSc Pro' (IA, Data, Cyber) ou 'Année Pré-MSc'.\n"
+            "   - Reconversion → 'Coding Academy'.\n\n"
+            
+            "### PHASE DE CONVERSION (IMPORTANT)\n"
+            "SIGNAUX D'INTÉRÊT à détecter : 'intéressant', 'cool', 'sympa', 'ça a l'air', 'je veux', 'inscription'...\n"
+            "SI SIGNAL DÉTECTÉ :\n"
+            "   1. Confirme son intérêt (ex: 'Content que ça te plaise !').\n"
+            "   2. Propose NATURELLEMENT de passer à l'étape suivante (contact, visite, candidature).\n"
+            "   3. Si tu as des infos de localisation (contexte système), utilise-les pour donner le contact du campus proche.\n"
+            "   4. RESTE NATUREL : pas de forcing commercial, juste helpful.\n\n"
 
-            "### INTERDICTIONS STRICTES (SAFEGUARDS)\n"
-            "- HORS-SUJET (Cuisine, Météo, Politique...) : INTERDICTION ABSOLUE de répondre. \n"
-            "  * Fais une blague tech : 'Je ne compile que du code !' ou 'Erreur 404: Recette non trouvée'.\n"
-            "  * STOP IMMEDIATE APRÈS LA BLAGUE. N'écris RIEN d'autre. NE DONNE PAS LA RECETTE.\n"
-            "- GEOLOCALISATION : Si tu n'es pas sûr du campus, demande le code postal. N'INVENTE JAMAIS D'ADRESSE.\n"
-            "- CURSUS INIVENTÉS : Il n'y a PAS de 'Master Ingénieur Innovation'. Il y a le 'Programme Grande École' et les 'MSc'.\n\n"
+            "### INTERDICTIONS STRICTES\n"
+            "- HORS-SUJET : Blague tech + STOP. Ne donne AUCUNE info sur le sujet.\n"
+            "- Cursus valides uniquement : 'Programme Grande École', 'MSc Pro', 'Coding Academy'.\n\n"
             
-            "### TRAME DE RÉPONSE\n"
-            "- Sois direct, tutoie l'étudiant, et sois enthousiaste.\n"
+            "### TRAME\n"
+            "- Direct, tutoiement, enthousiaste.\n"
+            "- Ne répète pas ce que l'utilisateur a déjà dit.\n"
+            "- TOUJOURS répondre dans la langue de l'utilisateur.\n"
+            f"{level_context}"
         )
 
         messages = [
