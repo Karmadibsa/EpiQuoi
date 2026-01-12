@@ -13,10 +13,11 @@ load_dotenv()
 app = FastAPI(title="EpiChat Backend", version="1.0.0")
 
 # Configuration CORS pour autoriser le frontend
+# NOTE: Pour le dev local, on autorise TOUT (*) et on désactive les credentials pour éviter les conflits.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"], # Autoriser le frontend Vite
-    allow_credentials=True,
+    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"], 
+    allow_credentials=True, 
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -63,22 +64,22 @@ def get_epitech_news():
 
 # Données des campus Epitech avec coordonnées APPROXIMATIVES (Lat, Lon)
 CAMPUSES = {
-    "Paris": {"zip": "94270", "addr": "24 rue Pasteur, 94270 Le Kremlin-Bicêtre", "coords": (48.8156, 2.3631), "email": "paris@epitech.eu", "phone": "01 44 08 00 60"},
-    "Bordeaux": {"zip": "33000", "addr": "81-89 Rue du Jardin public, 33000 Bordeaux", "coords": (44.8432, -0.5756), "email": "bordeaux@epitech.eu", "phone": "05 64 13 05 84"},
-    "Lille": {"zip": "59000", "addr": "5-9 Rue du Palais Rihour, 59000 Lille", "coords": (50.6359, 3.0617), "email": "lille@epitech.eu", "phone": "03 74 09 16 24"},
-    "Lyon": {"zip": "69000", "addr": "86 Boulevard Marius Vivier Merle, 69003 Lyon", "coords": (45.7597, 4.8584), "email": "lyon@epitech.eu", "phone": "04 28 29 33 25"},
-    "Marseille": {"zip": "13000", "addr": "21 Rue Marc Donadille, 13013 Marseille", "coords": (43.3444, 5.4243), "email": "marseille@epitech.eu", "phone": "04 84 89 13 54"},
-    "Montpellier": {"zip": "34000", "addr": "16 Boulevard des Arceaux, 34000 Montpellier", "coords": (43.6095, 3.8687), "email": "montpellier@epitech.eu", "phone": "04 11 93 17 52"},
-    "Nantes": {"zip": "44000", "addr": "18 Rue Flandres-Dunkerque, 44000 Nantes", "coords": (47.2156, -1.5552), "email": "nantes@epitech.eu", "phone": "02 85 52 28 71"},
-    "Nancy": {"zip": "54000", "addr": "80 Rue Saint-Georges, 54000 Nancy", "coords": (48.6923, 6.1848), "email": "nancy@epitech.eu", "phone": "03 72 47 11 50"},
-    "Nice": {"zip": "06000", "addr": "13 Rue Saint-François de Paule, 06300 Nice", "coords": (43.6961, 7.2718), "email": "nice@epitech.eu", "phone": "04 22 13 32 66"},
-    "Rennes": {"zip": "35000", "addr": "19 Rue Jean-Marie Huchet, 35000 Rennes", "coords": (48.1130, -1.6738), "email": "rennes@epitech.eu", "phone": "02 57 22 08 54"},
-    "Strasbourg": {"zip": "67000", "addr": "4 Rue du Dôme, 67000 Strasbourg", "coords": (48.5831, 7.7479), "email": "strasbourg@epitech.eu", "phone": "03 67 10 28 83"},
-    "Toulouse": {"zip": "31000", "addr": "40 Boulevard de la Marquette, 31000 Toulouse", "coords": (43.6125, 1.4287), "email": "toulouse@epitech.eu", "phone": "05 82 95 79 93"},
-    "Barcelone": {"zip": "08005", "addr": "Carrer de Joan Miró, 21, 08005 Barcelona, Espagne", "coords": (41.3909, 2.1940), "email": "barcelona@epitech.eu", "phone": "+34 937 97 88 14"},
-    "Berlin": {"zip": "10623", "addr": "Fasanenstraße 86, 10623 Berlin, Allemagne", "coords": (52.5084, 13.3293), "email": "berlin@epitech.eu", "phone": "+49 30 982 892 41"},
-    "Bruxelles": {"zip": "1000", "addr": "Rue Royale 196, 1000 Bruxelles, Belgique", "coords": (50.8523, 4.3651), "email": "brussels@epitech.eu", "phone": "+32 2 315 22 82"},
-    "Cotonou": {"zip": "00000", "addr": "Campus Sèmè One, Cotonou, Bénin", "coords": (6.3653, 2.4183), "email": "cotonou@epitech.eu", "phone": "+229 69 07 89 02"},
+    "Paris": {"country": "France", "zip": "94270", "addr": "24 rue Pasteur, 94270 Le Kremlin-Bicêtre", "coords": (48.8156, 2.3631), "email": "paris@epitech.eu", "phone": "01 44 08 00 60"},
+    "Bordeaux": {"country": "France", "zip": "33000", "addr": "81-89 Rue du Jardin public, 33000 Bordeaux", "coords": (44.8432, -0.5756), "email": "bordeaux@epitech.eu", "phone": "05 64 13 05 84"},
+    "Lille": {"country": "France", "zip": "59000", "addr": "5-9 Rue du Palais Rihour, 59000 Lille", "coords": (50.6359, 3.0617), "email": "lille@epitech.eu", "phone": "03 74 09 16 24"},
+    "Lyon": {"country": "France", "zip": "69000", "addr": "86 Boulevard Marius Vivier Merle, 69003 Lyon", "coords": (45.7597, 4.8584), "email": "lyon@epitech.eu", "phone": "04 28 29 33 25"},
+    "Marseille": {"country": "France", "zip": "13000", "addr": "21 Rue Marc Donadille, 13013 Marseille", "coords": (43.3444, 5.4243), "email": "marseille@epitech.eu", "phone": "04 84 89 13 54"},
+    "Montpellier": {"country": "France", "zip": "34000", "addr": "16 Boulevard des Arceaux, 34000 Montpellier", "coords": (43.6095, 3.8687), "email": "montpellier@epitech.eu", "phone": "04 11 93 17 52"},
+    "Nantes": {"country": "France", "zip": "44000", "addr": "18 Rue Flandres-Dunkerque, 44000 Nantes", "coords": (47.2156, -1.5552), "email": "nantes@epitech.eu", "phone": "02 85 52 28 71"},
+    "Nancy": {"country": "France", "zip": "54000", "addr": "80 Rue Saint-Georges, 54000 Nancy", "coords": (48.6923, 6.1848), "email": "nancy@epitech.eu", "phone": "03 72 47 11 50"},
+    "Nice": {"country": "France", "zip": "06000", "addr": "13 Rue Saint-François de Paule, 06300 Nice", "coords": (43.6961, 7.2718), "email": "nice@epitech.eu", "phone": "04 22 13 32 66"},
+    "Rennes": {"country": "France", "zip": "35000", "addr": "19 Rue Jean-Marie Huchet, 35000 Rennes", "coords": (48.1130, -1.6738), "email": "rennes@epitech.eu", "phone": "02 57 22 08 54"},
+    "Strasbourg": {"country": "France", "zip": "67000", "addr": "4 Rue du Dôme, 67000 Strasbourg", "coords": (48.5831, 7.7479), "email": "strasbourg@epitech.eu", "phone": "03 67 10 28 83"},
+    "Toulouse": {"country": "France", "zip": "31000", "addr": "40 Boulevard de la Marquette, 31000 Toulouse", "coords": (43.6125, 1.4287), "email": "toulouse@epitech.eu", "phone": "05 82 95 79 93"},
+    "Barcelone": {"country": "Espagne", "zip": "08005", "addr": "Carrer de Joan Miró, 21, 08005 Barcelona, Espagne", "coords": (41.3909, 2.1940), "email": "barcelona@epitech.eu", "phone": "+34 937 97 88 14"},
+    "Berlin": {"country": "Allemagne", "zip": "10623", "addr": "Fasanenstraße 86, 10623 Berlin, Allemagne", "coords": (52.5084, 13.3293), "email": "berlin@epitech.eu", "phone": "+49 30 982 892 41"},
+    "Bruxelles": {"country": "Belgique", "zip": "1000", "addr": "Rue Royale 196, 1000 Bruxelles, Belgique", "coords": (50.8523, 4.3651), "email": "brussels@epitech.eu", "phone": "+32 2 315 22 82"},
+    "Cotonou": {"country": "Benin", "zip": "00000", "addr": "Campus Sèmè One, Cotonou, Bénin", "coords": (6.3653, 2.4183), "email": "cotonou@epitech.eu", "phone": "+229 69 07 89 02"},
 }
 
 CITY_ALIASES = {
@@ -98,38 +99,84 @@ def haversine_distance(lat1, lon1, lat2, lon2):
     c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
     return R * c
 
-async def get_nearest_campus(user_zip):
+async def get_nearest_campus(query_zip):
     try:
-        # 1. Obtenir les coordonnées GPS du code postal via API Gouv
-        async with httpx.AsyncClient() as client:
-            resp = await client.get(f"https://api-adresse.data.gouv.fr/search/?q={user_zip}&limit=1")
-            data = resp.json()
-            
-        if not data.get('features'):
-            return None
-            
-        user_coords = data['features'][0]['geometry']['coordinates'] # [lon, lat]
-        user_lon, user_lat = user_coords[0], user_coords[1]
-        
-        user_label = data['features'][0]['properties'].get('label', 'Localisation inconnue')
-        user_context = data['features'][0]['properties'].get('context', '')
-        user_detected_info = f"{user_label} ({user_context})"
+        user_coords = None
+        user_label = "Localisation inconnue"
+        user_country_detected = "Inconnu"
 
-        # 2. Trouver le campus le plus proche (Distance Haversine)
-        min_dist = float('inf')
-        nearest = None
+        async with httpx.AsyncClient() as client:
+            # 1. Tentative API Gouv (France)
+            # On utilise query_zip ici
+            resp = await client.get(f"https://api-adresse.data.gouv.fr/search/?q={query_zip}&limit=1")
+            data = resp.json()
+
+            valid_french_result = False
+            if data.get('features'):
+                props = data['features'][0]['properties']
+                result_type = props.get('type')
+                user_city_name = props.get('city', '')
+                normalized_query = query_zip.lower().strip()
+                
+                # Validation anti faux-positifs
+                # Si c'est une rue et que le nom de la ville ne contient pas notre recherche
+                if not (result_type == 'street' and normalized_query not in user_city_name.lower()):
+                     valid_french_result = True
+                     user_coords = data['features'][0]['geometry']['coordinates']
+                     user_label = props.get('label')
+                     user_country_detected = "France"
+                else:
+                    # Si c'est rejeté comme faux positif (ex: Rue de metz à Nantes), on check si c'est un zip
+                    if query_zip.isdigit():
+                        # Si c'est un zip, on accepte quand même (c'est rare de taper un zip qui correspond à une rue ailleurs)
+                         valid_french_result = True
+                         user_coords = data['features'][0]['geometry']['coordinates']
+                         user_label = props.get('label')
+                         user_country_detected = "France"
+
+
+            # 2. Si échec France, Tentative OpenStreetMap (Monde)
+            if not valid_french_result:
+                print(f"🌍 Switching to Nominatim for: {query_zip}")
+                headers = {'User-Agent': 'EpiChat/1.0'}
+                resp_osm = await client.get(f"https://nominatim.openstreetmap.org/search?q={query_zip}&format=json&limit=1", headers=headers)
+                data_osm = resp_osm.json()
+                
+                if data_osm:
+                    user_coords = [float(data_osm[0]['lon']), float(data_osm[0]['lat'])]
+                    user_label = data_osm[0]['display_name']
+                    # Simplistic country detection from display name
+                    if "Germany" in user_label or "Deutschland" in user_label: user_country_detected = "Allemagne"
+                    elif "Spain" in user_label or "España" in user_label: user_country_detected = "Espagne"
+                    elif "Belgium" in user_label or "Belgique" in user_label: user_country_detected = "Belgique"
+                    else: user_country_detected = "Autre"
         
+        if not user_coords:
+            return None
+
+        user_lon, user_lat = user_coords[0], user_coords[1]
+        user_detected_info = f"{user_label} (Pays: {user_country_detected})"
+
+        # 3. Calcul des distances pour TOUS les campus
+        # On stocke tout pour trier
+        results = []
         for city, info in CAMPUSES.items():
             camp_lat, camp_lon = info['coords']
             dist = haversine_distance(user_lat, user_lon, camp_lat, camp_lon)
-            if dist < min_dist:
-                min_dist = dist
-                nearest = (city, info)
-
-        if nearest:
-             return (nearest[0], nearest[1], int(min_dist), user_detected_info) # (City, Data, Dist, UserInfo)
+            results.append({'city': city, 'dist': int(dist), 'data': info})
         
-        return None
+        # Tri par distance
+        results.sort(key=lambda x: x['dist'])
+
+        nearest_overall = results[0]
+        
+        # Trouver le plus proche DANS LE PAYS de l'utilisateur (si connu)
+        nearest_in_country = None
+        if user_country_detected and user_country_detected != "Autre":
+             nearest_in_country = next((r for r in results if r['data']['country'] == user_country_detected), None)
+
+        return (nearest_overall, nearest_in_country, user_detected_info)
+
     except Exception as e:
         print(f"Erreur Geo: {e}")
         return None
@@ -145,6 +192,20 @@ async def chat_endpoint(request: ChatRequest):
     backend_source = f"Ollama Local ({model_name})"
     
     msg_lower = request.message.lower()
+
+    # Détection de langue (Basique)
+    user_lang = "fr"
+    try:
+        from langdetect import detect
+        if len(request.message.split()) > 3: # On ne détecte que si le message est assez long
+            detected = detect(request.message)
+            if detected != 'fr':
+                user_lang = detected
+                print(f"🌍 Language Detected: {user_lang}")
+    except ImportError:
+        print("⚠️ Langdetect not installed")
+    except Exception as e:
+        print(f"⚠️ Lang detection failed: {e}")
 
     # Tool 1: News Scraper
     if any(k in msg_lower for k in keywords_news) and "epitech" in msg_lower:
@@ -219,33 +280,67 @@ async def chat_endpoint(request: ChatRequest):
              data = CAMPUSES[city]
              dist_km = 0
              user_detected_info = f"{city} (Détection directe)"
-             near_campus = (city, data, dist_km, user_detected_info) # On simule le retour
+             
+             # Mock structure for direct match
+             nearest_overall = {'city': city, 'dist': 0, 'data': data}
+             nearest_in_country = nearest_overall
+             near_campus = (nearest_overall, nearest_in_country, user_detected_info) 
         else:
              print(f"🔍 Tool Activation: Geocoding API ({location_query})")
              near_campus = await get_nearest_campus(location_query)
              
         if near_campus:
-            city, data, dist_km, user_detected_info = near_campus # NEW: Unpacking 4 elements
+            nearest_overall, nearest_in_country, user_detected_info = near_campus 
             
-            is_same_city = location_query.lower() in city.lower() or city.lower() in location_query.lower()
+            # --- FIX: Initialization of variables used later ---
+            city = nearest_overall['city']
+            data = nearest_overall['data']
+            dist_km = nearest_overall['dist']
+            # ---------------------------------------------------
 
-            # SI ON EST DANS LA VILLE DU CAMPUS (Distance < 10km ou même ville)
-            if is_same_city or dist_km < 10:
+            # PAR DÉFAUT : On recommande le plus proche absolu
+            rec_city = nearest_overall['city']
+            rec_data = nearest_overall['data']
+            rec_dist = nearest_overall['dist']
+            
+            # EXCEPTION GEOPOLITIQUE : Si un campus existe dans le MEME PAYS que l'user, on le priorise
+            # sauf si la différence de distance est énorme (ex: > 300km)
+            is_national_priority = False
+            if nearest_in_country and nearest_in_country['city'] != rec_city:
+                 nat_dist = nearest_in_country['dist']
+                 # On favorise le national si la distance reste raisonnable par rapport à l'absolu (ex: Absolu 120km FR vs National 140km ES -> Go ES)
+                 if nat_dist < (rec_dist + 200): 
+                      rec_city = nearest_in_country['city']
+                      rec_data = nearest_in_country['data']
+                      rec_dist = nat_dist
+                      is_national_priority = True
+
+            is_same_city = location_query.lower() in rec_city.lower() or rec_city.lower() in location_query.lower()
+
+            # SI ON EST DANS LA VILLE DU CAMPUS
+            if is_same_city or rec_dist < 10:
                 context_extra += (
                     f"\n\n[INFO SYSTÈME: CAMPUS PRÉSENT !]\n"
-                    f"Excellente nouvelle : Epitech est PRÉSENT à {city} !\n"
-                    f"Tu PEUX lui donner directement l'adresse : {data['addr']}.\n"
-                    f"Contact : {data.get('email', 'N/A')} | {data.get('phone', 'N/A')}\n"
+                    f"Excellente nouvelle : Epitech est PRÉSENT à {rec_city} !\n"
+                    f"Adresse : {rec_data['addr']}.\n"
+                    f"Contact : {rec_data.get('email', 'N/A')} | {rec_data.get('phone', 'N/A')}\n"
                 )
             else:
                  # CAS ELOIGNÉ
+                 priority_msg = "PREFERENCE NATIONALE" if is_national_priority else "PROXIMITÉ GÉOGRAPHIQUE"
                  context_extra += (
                     f"\n\n[INFO SYSTÈME: LOCALISATION]\n"
-                    f"L'utilisateur semble être à : '{location_query}' ({user_detected_info}).\n"
-                    f"ATTENTION : Pas de campus EXACTEMENT ici. Le plus proche est {city.upper()} ({dist_km} km).\n"
-                    f"Propose-lui de contacter {city}.\n"
-                    f"Coordonnées de {city}: {data['addr']}.\n"
-                    f"Contact {city}: {data.get('email', 'N/A')} | {data.get('phone', 'N/A')}\n"
+                    f"L'utilisateur est à : '{location_query}' ({user_detected_info}).\n"
+                    f"Campus recommandé ({priority_msg}) : {rec_city.upper()} ({rec_dist} km).\n"
+                 )
+                 
+                 if is_national_priority:
+                     context_extra += f"Note: Le campus absolu le plus proche est {nearest_overall['city']} ({nearest_overall['dist']}km), mais il est dans un autre pays.\n"
+
+                 context_extra += (
+                    f"Propose-lui de contacter {rec_city}.\n"
+                    f"Coordonnées de {rec_city}: {rec_data['addr']}.\n"
+                    f"Contact {rec_city}: {rec_data.get('email', 'N/A')} | {rec_data.get('phone', 'N/A')}\n"
                  )
             
             if not is_same_city and dist_km > 5: # Si > 5km de différence
@@ -260,7 +355,8 @@ async def chat_endpoint(request: ChatRequest):
 
     # DEBUG: Voir ce qui est détecté
     if location_query:
-        print(f"DEBUG LOCATION: Query='{location_query}' -> Nearest='{city}'")
+        debug_city = city if 'city' in locals() else "None"
+        print(f"DEBUG LOCATION: Query='{location_query}' -> Nearest='{debug_city}'")
 
 
     try:
@@ -329,7 +425,10 @@ async def chat_endpoint(request: ChatRequest):
             final_user_content += f"\n\n(Information système : {context_extra})"
         
         # Consigne Langue (Force à la fin)
-        final_user_content += "\n\n[INSTRUCTION SYSTÈME ULTIME : RÉPONDS DANS LA MÊME LANGUE QUE LE MESSAGE DE L'UTILISATEUR (Français si User parle FR, Anglais si User parle EN, etc.)]"
+        if user_lang != 'fr':
+             final_user_content += f"\n\n[CRITICAL: THE USER SPEAKS {user_lang.upper()}. YOU MUST ANSWER IN {user_lang.upper()}. DO NOT SPEAK FRENCH.]"
+        else:
+             final_user_content += "\n\n[INSTRUCTION SYSTÈME ULTIME : RÉPONDS DANS LA MÊME LANGUE QUE LE MESSAGE DE L'UTILISATEUR]"
 
         messages.append({'role': 'user', 'content': final_user_content})
 
