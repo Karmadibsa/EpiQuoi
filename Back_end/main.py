@@ -75,6 +75,18 @@ CAMPUSES = {
     "Rennes": {"zip": "35000", "addr": "19 Rue Jean-Marie Huchet, 35000 Rennes", "coords": (48.1130, -1.6738), "email": "rennes@epitech.eu", "phone": "02 57 22 08 54"},
     "Strasbourg": {"zip": "67000", "addr": "4 Rue du Dôme, 67000 Strasbourg", "coords": (48.5831, 7.7479), "email": "strasbourg@epitech.eu", "phone": "03 67 10 28 83"},
     "Toulouse": {"zip": "31000", "addr": "40 Boulevard de la Marquette, 31000 Toulouse", "coords": (43.6125, 1.4287), "email": "toulouse@epitech.eu", "phone": "05 82 95 79 93"},
+    "Barcelone": {"zip": "08005", "addr": "Carrer de Joan Miró, 21, 08005 Barcelona, Espagne", "coords": (41.3909, 2.1940), "email": "barcelona@epitech.eu", "phone": "+34 937 97 88 14"},
+    "Berlin": {"zip": "10623", "addr": "Fasanenstraße 86, 10623 Berlin, Allemagne", "coords": (52.5084, 13.3293), "email": "berlin@epitech.eu", "phone": "+49 30 982 892 41"},
+    "Bruxelles": {"zip": "1000", "addr": "Rue Royale 196, 1000 Bruxelles, Belgique", "coords": (50.8523, 4.3651), "email": "brussels@epitech.eu", "phone": "+32 2 315 22 82"},
+    "Cotonou": {"zip": "00000", "addr": "Campus Sèmè One, Cotonou, Bénin", "coords": (6.3653, 2.4183), "email": "cotonou@epitech.eu", "phone": "+229 69 07 89 02"},
+}
+
+CITY_ALIASES = {
+    "barcelona": "Barcelone",
+    "barna": "Barcelone",
+    "brussels": "Bruxelles",
+    "brussel": "Bruxelles",
+    "berlim": "Berlin",
 }
 
 def haversine_distance(lat1, lon1, lat2, lon2):
@@ -99,6 +111,10 @@ async def get_nearest_campus(user_zip):
         user_coords = data['features'][0]['geometry']['coordinates'] # [lon, lat]
         user_lon, user_lat = user_coords[0], user_coords[1]
         
+        user_label = data['features'][0]['properties'].get('label', 'Localisation inconnue')
+        user_context = data['features'][0]['properties'].get('context', '')
+        user_detected_info = f"{user_label} ({user_context})"
+
         # 2. Trouver le campus le plus proche (Distance Haversine)
         min_dist = float('inf')
         nearest = None
@@ -109,12 +125,11 @@ async def get_nearest_campus(user_zip):
             if dist < min_dist:
                 min_dist = dist
                 nearest = (city, info)
-                
-        # On injecte la distance dans info pour l'utiliser plus tard
-        if nearest:
-            nearest[1]['dist'] = int(min_dist)
 
-        return nearest # (City, Data)
+        if nearest:
+             return (nearest[0], nearest[1], int(min_dist), user_detected_info) # (City, Data, Dist, UserInfo)
+        
+        return None
     except Exception as e:
         print(f"Erreur Geo: {e}")
         return None
@@ -167,45 +182,108 @@ async def chat_endpoint(request: ChatRequest):
             else:
                  location_query = parts[0] if parts else None
 
-    if location_query:
+    # Fallback: Si pas de regex location trouvée, on cherche si une ville connue (ou alias) est citée directement
+    if not location_query:
+        # Check Main Cities
+        for known_city in CAMPUSES.keys():
+             if known_city.lower() in msg_lower:
+                 location_query = known_city
+                 break
+        # Check Aliases
+        if not location_query:
+            for alias, target_city in CITY_ALIASES.items():
+                if alias in msg_lower:
+                    location_query = target_city
+                    break
 
-        print(f"🔍 Tool Activation: Campus Finder (Query: {location_query})")
-        near_campus = await get_nearest_campus(location_query)
+    direct_city_match = None
+    if location_query:
+        # Check si la location trouvée (via regex ou fallback) est une ville campus connue
+        # On normalise pour vérifier
+        loc_normalized = location_query.lower()
+        
+        # 1. Check direct keys
+        for known_city in CAMPUSES.keys():
+            if known_city.lower() == loc_normalized:
+                direct_city_match = known_city
+                break
+        
+        # 2. Check aliases if not found
+        if not direct_city_match:
+            if loc_normalized in CITY_ALIASES:
+                direct_city_match = CITY_ALIASES[loc_normalized]
+
+        if direct_city_match:
+             print(f"🔍 Tool Activation: Direct City Match! ({direct_city_match}) - Skipping Geocoder")
+             city = direct_city_match
+             data = CAMPUSES[city]
+             dist_km = 0
+             user_detected_info = f"{city} (Détection directe)"
+             near_campus = (city, data, dist_km, user_detected_info) # On simule le retour
+        else:
+             print(f"🔍 Tool Activation: Geocoding API ({location_query})")
+             near_campus = await get_nearest_campus(location_query)
+             
         if near_campus:
-            city, data = near_campus
-            dist_km = int(data.get('dist', 0)) if 'dist' in data else 0 # You might need to add distance to return of get_nearest_campus if not there, otherwise assume it is handled or calculate it.
-            # Actually get_nearest_campus returns (city, info). let's add distance to return or just handle logic here.
-            # wait, get_nearest_campus returns (city, info). info has 'coords'.
-            # Let's just trust variable names.
+            city, data, dist_km, user_detected_info = near_campus # NEW: Unpacking 4 elements
             
             is_same_city = location_query.lower() in city.lower() or city.lower() in location_query.lower()
 
-            context_extra += (
-                f"\n\n[SYSTÈME: LOCALISATION DÉTECTÉE]\n"
-                f"L'utilisateur est localisé à : {location_query.upper()}.\n"
-                f"Le campus Epitech LE PLUS PROCHE est à : {city.upper()} (Distance: {dist_km} km).\n"
-                f"Coordonnées de {city}: {data['addr']}.\n"
-                f"Contact {city}: {data.get('email', 'N/A')} | {data.get('phone', 'N/A')}\n"
-            )
+            # SI ON EST DANS LA VILLE DU CAMPUS (Distance < 10km ou même ville)
+            if is_same_city or dist_km < 10:
+                context_extra += (
+                    f"\n\n[INFO SYSTÈME: CAMPUS PRÉSENT !]\n"
+                    f"Excellente nouvelle : Epitech est PRÉSENT à {city} !\n"
+                    f"Tu PEUX lui donner directement l'adresse : {data['addr']}.\n"
+                    f"Contact : {data.get('email', 'N/A')} | {data.get('phone', 'N/A')}\n"
+                )
+            else:
+                 # CAS ELOIGNÉ
+                 context_extra += (
+                    f"\n\n[INFO SYSTÈME: LOCALISATION]\n"
+                    f"L'utilisateur semble être à : '{location_query}' ({user_detected_info}).\n"
+                    f"ATTENTION : Pas de campus EXACTEMENT ici. Le plus proche est {city.upper()} ({dist_km} km).\n"
+                    f"Propose-lui de contacter {city}.\n"
+                    f"Coordonnées de {city}: {data['addr']}.\n"
+                    f"Contact {city}: {data.get('email', 'N/A')} | {data.get('phone', 'N/A')}\n"
+                 )
             
             if not is_same_city and dist_km > 5: # Si > 5km de différence
                  context_extra += (
-                    f"\n/!\\ ALERTE HALLUCINATION /!\\\n"
-                    f"IL N'Y A PAS DE CAMPUS EPITECH À {location_query.upper()} ! NE L'INVENTE PAS.\n"
-                    f"TU DOIS DIRE : 'Même si tu es à {location_query}, le campus le plus proche est celui de {city}.'\n"
-                    f"INTERDICTION DE DONNER UNE ADRESSE OU UN TÉLÉPHONE À {location_query}.\n"
-                    f"DONNE UNIQUEMENT LES INFOS DE {city}.\n"
+                    f"CONTEXTE GEOGRAPHIQUE : L'utilisateur se trouve à {location_query}, où il n'y a PAS de campus Epitech. "
+                    f"Le campus le plus proche est celui de {city} (à {dist_km}km). "
+                    f"Il faut donc lui proposer de contacter le campus de {city}. "
+                    f"Ne pas inventer de campus à {location_query}."
                  )
             
-            context_extra += f"Si l'utilisateur pose une question logistique, donne les infos de {city}."
+            context_extra += f"\nInfos contact pour {city} : {data.get('email', 'N/A')} | {data.get('phone', 'N/A')}."
+
+    # DEBUG: Voir ce qui est détecté
+    if location_query:
+        print(f"DEBUG LOCATION: Query='{location_query}' -> Nearest='{city}'")
+
 
     try:
         # Construction des messages pour Ollama
-        # Construction des messages pour Ollama
+        
+        # LISTE OFFICIELLE POUR ANTI-HALLUCINATION
+        valid_cities_str = ", ".join([c.upper() for c in CAMPUSES.keys()])
+
         system_content = (
             "### RÔLE\n"
-            "Tu es 'EpiQuoi', conseiller d'orientation Epitech. Ton but : Qualifier le profil de l'étudiant pour lui vendre le bon cursus.\n\n"
+            "Tu es 'EpiQuoi', conseiller d'orientation Epitech. Ton but : Qualifier le profil de l'étudiant.\n\n"
             
+            "### LANGUE (IMPORTANT)\n"
+            "DETECTE LA LANGUE DE L'UTILISATEUR (Français, Anglais, Espagnol...) ET RÉPONDS DANS LA MÊME LANGUE.\n"
+            "C'est primordial pour l'expérience utilisateur.\n\n"
+            
+            "### VÉRITÉ GÉOGRAPHIQUE (CRITIQUE)\n"
+            f"Voici la LISTE EXCLUSIVE des villes où Epitech a un campus : {valid_cities_str}.\n"
+            "RÈGLE D'OR : Si l'utilisateur mentionne une ville (ex: Metz, Brest, Tours...) qui n'est PAS dans cette liste :\n"
+            "1. TU DOIS DIRE qu'il n'y a pas de campus dans cette ville.\n"
+            "2. Propose toujours le campus le plus proche (selon le contexte système).\n"
+            "3. N'INVENTE JAMAIS D'ADRESSE ou de téléphone pour une ville hors liste.\n\n"
+
             "### PROTOCOLE DE PROFILAGE (OBLIGATOIRE)\n"
             "1. SI TU NE CONNAIS PAS LE NIVEAU D'ÉTUDES DE L'UTILISATEUR (Lycée, Bac, Bac+2, Bac+3...) :\n"
             "   - NE DONNE PAS LA LISTE DES CURSUS TOUT DE SUITE.\n"
@@ -229,7 +307,6 @@ async def chat_endpoint(request: ChatRequest):
             
             "### TRAME DE RÉPONSE\n"
             "- Sois direct, tutoie l'étudiant, et sois enthousiaste.\n"
-            f"{context_extra}"
         )
 
         messages = [
@@ -245,10 +322,18 @@ async def chat_endpoint(request: ChatRequest):
                   if not turn.get("isError"): 
                       messages.append({'role': role, 'content': turn.get("text", "")})
 
-        messages.append({'role': 'user', 'content': request.message})
+        # FORCER LE CONTEXTE DANS LE DERNIER MESSAGE USER
+        # C'est la technique la plus efficace contre les hallucinations : mettre le contexte juste devant la tâche.
+        final_user_content = request.message
+        if context_extra:
+            final_user_content += f"\n\n(Information système : {context_extra})"
+        
+        # Consigne Langue (Force à la fin)
+        final_user_content += "\n\n[INSTRUCTION SYSTÈME ULTIME : RÉPONDS DANS LA MÊME LANGUE QUE LE MESSAGE DE L'UTILISATEUR (Français si User parle FR, Anglais si User parle EN, etc.)]"
+
+        messages.append({'role': 'user', 'content': final_user_content})
 
         response = ollama.chat(model=model_name, messages=messages, options={"temperature": 0.3})
-
         return {
             "response": response['message']['content'],
             "backend_source": backend_source
