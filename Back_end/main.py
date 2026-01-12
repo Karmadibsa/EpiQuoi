@@ -385,7 +385,7 @@ async def chat_endpoint(request: ChatRequest):
         # LISTE OFFICIELLE POUR ANTI-HALLUCINATION
         valid_cities_str = ", ".join([c.upper() for c in CAMPUSES.keys()])
 
-        # --- DETECTION AUTOMATIQUE DU NIVEAU D'ÉTUDES ---
+        # --- DETECTION AUTOMATIQUE DU NIVEAU D'ÉTUDES (Historique + Message Actuel) ---
         detected_level = None
         level_keywords = {
             "bac": ["bac ", "bac+0", "baccalauréat", "terminale", "stmg", "sti2d", "stl", "st2s", "es", "s ", "l ", "bac s", "bac es", "bac l", "bac pro", "bac techno"],
@@ -397,12 +397,19 @@ async def chat_endpoint(request: ChatRequest):
             "lycee": ["lycée", "lyceen", "seconde", "première", "1ère", "2nde"]
         }
         
-        msg_check = msg_lower
+        # On regarde TOUT ce que l'utilisateur a dit jusqu'ici pour trouver son niveau
+        full_user_context = msg_lower
+        if request.history:
+            for turn in request.history:
+                if turn.get("sender") == "user":
+                    full_user_context += " " + turn.get("text", "").lower()
+
+        # Recherche des keywords dans tout le contexte
         for level, keywords in level_keywords.items():
             for kw in keywords:
-                if kw in msg_check:
+                if kw in full_user_context:
                     detected_level = level
-                    print(f"🎓 Niveau d'études détecté: {level} (keyword: '{kw}')")
+                    print(f"🎓 Niveau d'études détecté (dans historique/message): {level} (keyword: '{kw}')")
                     break
             if detected_level:
                 break
@@ -413,22 +420,31 @@ async def chat_endpoint(request: ChatRequest):
             if detected_level in ["bac", "lycee"]:
                 level_context = (
                     "\n\n[INFO SYSTÈME: NIVEAU DÉTECTÉ = BAC/LYCÉE]\n"
-                    "L'utilisateur a mentionné avoir le BAC ou être au lycée. "
-                    "NE LUI DEMANDE PAS SON NIVEAU, tu le connais déjà ! "
-                    "Propose-lui directement le 'Programme Grande École' (5 ans, post-bac) !\n"
+                    "L'utilisateur est niveau Bac/Lycée. Propose UNIQUEMENT le 'Programme Grande École' (5 ans).\n"
                 )
-            elif detected_level in ["bac+2", "bac+3"]:
+            elif detected_level in ["bac+2", "bac+3", "bac+4", "bac+5"]:
                 level_context = (
                     f"\n\n[INFO SYSTÈME: NIVEAU DÉTECTÉ = {detected_level.upper()}]\n"
-                    "L'utilisateur a un Bac+2 ou Bac+3. "
-                    "Propose-lui les 'MSc Pro' (IA, Data, Cybersécurité) ou l'Année Pré-MSc !\n"
+                    "⚠️ ATTENTION : L'utilisateur a déjà un diplôme supérieur (Bac+2/3/4/5).\n"
+                    "1. S'il demande si le 'PGE' (Programme Grande École) est bien pour lui, CORRIGE-LE gentiment.\n"
+                    "   Dis-lui : 'Avec ton niveau, tu n'as pas besoin de reprendre à zéro ! Tu peux intégrer directement nos MSc Pro ou l'année Pré-MSc.'\n"
+                    "2. Ton objectif est de vendre les 'MSc Pro' (Spécialisation) ou l'Année Pré-MSc.\n"
                 )
             elif detected_level == "reconversion":
                 level_context = (
                     "\n\n[INFO SYSTÈME: NIVEAU DÉTECTÉ = RECONVERSION]\n"
-                    "L'utilisateur est en reconversion professionnelle. "
-                    "Propose-lui la 'Coding Academy' (bootcamp intensif) !\n"
+                    "L'utilisateur veut changer de vie. Ne propose PAS le cursus étudiant classique (PGE).\n"
+                    "Propose la 'Coding Academy' (Formation intensive pour adultes).\n"
                 )
+        else:
+             # CAS NIVEAU INCONNU - CRITIQUE POUR EVITER "YES MAN"
+             level_context = (
+                "\n\n[INFO SYSTÈME: NIVEAU D'ÉTUDES INCONNU]\n"
+                "⚠️ Tu ne sais PAS encore quel niveau scolaire a l'utilisateur.\n"
+                "1. NE PROPOSE AUCUN CURSUS SPÉCIFIQUE (ni PGE, ni MSc...).\n"
+                "2. DEMANDE-LUI d'abord : 'Pour te conseiller au mieux, quel est ton niveau d'études actuel (Lycée, Bac+2, Reconversion...) ?'\n"
+                "3. N'invente pas un profil à l'utilisateur.\n"
+             )
 
         # CORRECTION #1 - ANTI-HALLUCINATION : Injecter la liste TOUJOURS, pas seulement si l'outil est déclenché
         # Construction de la "Feuille de Triche" des adresses (Anti-hallucination Ultime)
