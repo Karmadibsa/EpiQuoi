@@ -63,18 +63,18 @@ def get_epitech_news():
 
 # Données des campus Epitech avec coordonnées APPROXIMATIVES (Lat, Lon)
 CAMPUSES = {
-    "Paris": {"zip": "94270", "addr": "24 rue Pasteur, 94270 Le Kremlin-Bicêtre", "coords": (48.8156, 2.3631)},
-    "Bordeaux": {"zip": "33000", "addr": "81-89 Rue du Jardin public, 33000 Bordeaux", "coords": (44.8432, -0.5756)},
-    "Lille": {"zip": "59000", "addr": "5-9 Rue du Palais Rihour, 59000 Lille", "coords": (50.6359, 3.0617)},
-    "Lyon": {"zip": "69000", "addr": "86 Boulevard Marius Vivier Merle, 69003 Lyon", "coords": (45.7597, 4.8584)},
-    "Marseille": {"zip": "13000", "addr": "21 Rue Marc Donadille, 13013 Marseille", "coords": (43.3444, 5.4243)},
-    "Montpellier": {"zip": "34000", "addr": "16 Boulevard des Arceaux, 34000 Montpellier", "coords": (43.6095, 3.8687)},
-    "Nantes": {"zip": "44000", "addr": "18 Rue Flandres-Dunkerque, 44000 Nantes", "coords": (47.2156, -1.5552)},
-    "Nancy": {"zip": "54000", "addr": "80 Rue Saint-Georges, 54000 Nancy", "coords": (48.6923, 6.1848)},
-    "Nice": {"zip": "06000", "addr": "13 Rue Saint-François de Paule, 06300 Nice", "coords": (43.6961, 7.2718)},
-    "Rennes": {"zip": "35000", "addr": "19 Rue Jean-Marie Huchet, 35000 Rennes", "coords": (48.1130, -1.6738)},
-    "Strasbourg": {"zip": "67000", "addr": "4 Rue du Dôme, 67000 Strasbourg", "coords": (48.5831, 7.7479)},
-    "Toulouse": {"zip": "31000", "addr": "40 Boulevard de la Marquette, 31000 Toulouse", "coords": (43.6125, 1.4287)},
+    "Paris": {"zip": "94270", "addr": "24 rue Pasteur, 94270 Le Kremlin-Bicêtre", "coords": (48.8156, 2.3631), "email": "paris@epitech.eu", "phone": "01 44 08 00 60"},
+    "Bordeaux": {"zip": "33000", "addr": "81-89 Rue du Jardin public, 33000 Bordeaux", "coords": (44.8432, -0.5756), "email": "bordeaux@epitech.eu", "phone": "05 64 13 05 84"},
+    "Lille": {"zip": "59000", "addr": "5-9 Rue du Palais Rihour, 59000 Lille", "coords": (50.6359, 3.0617), "email": "lille@epitech.eu", "phone": "03 74 09 16 24"},
+    "Lyon": {"zip": "69000", "addr": "86 Boulevard Marius Vivier Merle, 69003 Lyon", "coords": (45.7597, 4.8584), "email": "lyon@epitech.eu", "phone": "04 28 29 33 25"},
+    "Marseille": {"zip": "13000", "addr": "21 Rue Marc Donadille, 13013 Marseille", "coords": (43.3444, 5.4243), "email": "marseille@epitech.eu", "phone": "04 84 89 13 54"},
+    "Montpellier": {"zip": "34000", "addr": "16 Boulevard des Arceaux, 34000 Montpellier", "coords": (43.6095, 3.8687), "email": "montpellier@epitech.eu", "phone": "04 11 93 17 52"},
+    "Nantes": {"zip": "44000", "addr": "18 Rue Flandres-Dunkerque, 44000 Nantes", "coords": (47.2156, -1.5552), "email": "nantes@epitech.eu", "phone": "02 85 52 28 71"},
+    "Nancy": {"zip": "54000", "addr": "80 Rue Saint-Georges, 54000 Nancy", "coords": (48.6923, 6.1848), "email": "nancy@epitech.eu", "phone": "03 72 47 11 50"},
+    "Nice": {"zip": "06000", "addr": "13 Rue Saint-François de Paule, 06300 Nice", "coords": (43.6961, 7.2718), "email": "nice@epitech.eu", "phone": "04 22 13 32 66"},
+    "Rennes": {"zip": "35000", "addr": "19 Rue Jean-Marie Huchet, 35000 Rennes", "coords": (48.1130, -1.6738), "email": "rennes@epitech.eu", "phone": "02 57 22 08 54"},
+    "Strasbourg": {"zip": "67000", "addr": "4 Rue du Dôme, 67000 Strasbourg", "coords": (48.5831, 7.7479), "email": "strasbourg@epitech.eu", "phone": "03 67 10 28 83"},
+    "Toulouse": {"zip": "31000", "addr": "40 Boulevard de la Marquette, 31000 Toulouse", "coords": (43.6125, 1.4287), "email": "toulouse@epitech.eu", "phone": "05 82 95 79 93"},
 }
 
 def haversine_distance(lat1, lon1, lat2, lon2):
@@ -110,7 +110,10 @@ async def get_nearest_campus(user_zip):
                 min_dist = dist
                 nearest = (city, info)
                 
-        # On retourne aussi la distance pour info
+        # On injecte la distance dans info pour l'utiliser plus tard
+        if nearest:
+            nearest[1]['dist'] = int(min_dist)
+
         return nearest # (City, Data)
     except Exception as e:
         print(f"Erreur Geo: {e}")
@@ -137,20 +140,64 @@ async def chat_endpoint(request: ChatRequest):
 
     # Tool 2: Campus Finder (Détection de Code Postal)
     import re
+    location_query = None
+    
+    # 1. Regex Code Postal (5 chiffres)
     zip_match = re.search(r'\b\d{5}\b', request.message)
     if zip_match:
-        user_zip = zip_match.group(0)
-        print(f"🔍 Tool Activation: Campus Finder (Zip: {user_zip})")
-        near_campus = await get_nearest_campus(user_zip)
+        location_query = zip_match.group(0)
+    else:
+        # 2. Regex Ville (ex: "habite à Metz", "suis de Lyon")
+        city_match = re.search(r'(?i)(?:habite|vivre|suis|campus|ville|vers)\s+(?:à|a|de|sur)\s+([a-zA-Z\u00C0-\u00FF\s\-]+)', request.message)
+        if city_match:
+            # On prend le premier mot ou groupe de mots significatif
+            captured = city_match.group(1).strip()
+            # Nettoyage brutal: si on a "Metz j", on garde "Metz"
+            # On split sur l'espace et on garde les morceaux qui sont plus longs que 1 char (sauf "Le" etc)
+            parts = captured.split()
+            cleaned_parts = []
+            for p in parts:
+                if len(p) > 2 or p.lower() in ["le", "la", "les", "san", "los", "new"]:
+                    cleaned_parts.append(p)
+                else:
+                    break # Dès qu'on tombe sur un mot bizarre ("j", "et"), on arrête
+            
+            if cleaned_parts:
+                location_query = " ".join(cleaned_parts)
+            else:
+                 location_query = parts[0] if parts else None
+
+    if location_query:
+
+        print(f"🔍 Tool Activation: Campus Finder (Query: {location_query})")
+        near_campus = await get_nearest_campus(location_query)
         if near_campus:
             city, data = near_campus
+            dist_km = int(data.get('dist', 0)) if 'dist' in data else 0 # You might need to add distance to return of get_nearest_campus if not there, otherwise assume it is handled or calculate it.
+            # Actually get_nearest_campus returns (city, info). let's add distance to return or just handle logic here.
+            # wait, get_nearest_campus returns (city, info). info has 'coords'.
+            # Let's just trust variable names.
+            
+            is_same_city = location_query.lower() in city.lower() or city.lower() in location_query.lower()
+
             context_extra += (
                 f"\n\n[SYSTÈME: LOCALISATION DÉTECTÉE]\n"
-                f"L'utilisateur a donné le code postal {user_zip}.\n"
-                f"Le campus Epitech le plus proche (estimation dept) est à {city}.\n"
-                f"Adresse: {data['addr']}.\n"
-                f"Si l'utilisateur a parlé de choix de spécialité ou d'inscription, donne-lui ces infos."
+                f"L'utilisateur est localisé à : {location_query.upper()}.\n"
+                f"Le campus Epitech LE PLUS PROCHE est à : {city.upper()} (Distance: {dist_km} km).\n"
+                f"Coordonnées de {city}: {data['addr']}.\n"
+                f"Contact {city}: {data.get('email', 'N/A')} | {data.get('phone', 'N/A')}\n"
             )
+            
+            if not is_same_city and dist_km > 5: # Si > 5km de différence
+                 context_extra += (
+                    f"\n/!\\ ALERTE HALLUCINATION /!\\\n"
+                    f"IL N'Y A PAS DE CAMPUS EPITECH À {location_query.upper()} ! NE L'INVENTE PAS.\n"
+                    f"TU DOIS DIRE : 'Même si tu es à {location_query}, le campus le plus proche est celui de {city}.'\n"
+                    f"INTERDICTION DE DONNER UNE ADRESSE OU UN TÉLÉPHONE À {location_query}.\n"
+                    f"DONNE UNIQUEMENT LES INFOS DE {city}.\n"
+                 )
+            
+            context_extra += f"Si l'utilisateur pose une question logistique, donne les infos de {city}."
 
     try:
         # Construction des messages pour Ollama
@@ -168,10 +215,16 @@ async def chat_endpoint(request: ChatRequest):
             "   - Lycée/Bac : Propose le 'Programme Grande École' (5 ans).\n"
             "   - Bac+2/3 : Propose les 'MSc Pro' (IA, Data, Cyber) ou l'Année Pré-MSc.\n"
             "   - Reconversion : Propose la 'Coding Academy'.\n"
-            "   - NE PARLE JAMAIS DE BAC+6 OU D'INGÉNIEUR CLASSIQUE.\n\n"
+            "3. PHASE DE CONVERSION (CLOSING) :\n"
+            "   - SI l'utilisateur montre de l'intérêt ('cool', 'je veux m'inscrire', 'intéressant')...\n"
+            "   - ALORS : Incite-le FORTEMENT à prendre contact ou visiter le campus. Utilise les infos de localisation si disponibles.\n"
+            "   - Exemple : 'C'est top ! Le mieux maintenant c'est de venir voir ça en vrai. Tu peux contacter Epitech [Ville] au [Tel] ou par mail à [Email] !'\n\n"
 
             "### INTERDICTIONS STRICTES (SAFEGUARDS)\n"
-            "- HORS-SUJET (Cuisine, Météo...) : INTERDICTION de répondre. Fais une blague tech : 'Je ne compile que du code !'.\n"
+            "- HORS-SUJET (Cuisine, Météo, Politique...) : INTERDICTION ABSOLUE de répondre. \n"
+            "  * Fais une blague tech : 'Je ne compile que du code !' ou 'Erreur 404: Recette non trouvée'.\n"
+            "  * STOP IMMEDIATE APRÈS LA BLAGUE. N'écris RIEN d'autre. NE DONNE PAS LA RECETTE.\n"
+            "- GEOLOCALISATION : Si tu n'es pas sûr du campus, demande le code postal. N'INVENTE JAMAIS D'ADRESSE.\n"
             "- CURSUS INIVENTÉS : Il n'y a PAS de 'Master Ingénieur Innovation'. Il y a le 'Programme Grande École' et les 'MSc'.\n\n"
             
             "### TRAME DE RÉPONSE\n"
