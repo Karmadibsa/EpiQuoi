@@ -6,6 +6,7 @@ import os
 from dotenv import load_dotenv
 import httpx
 import math
+import asyncio
 
 # Charger les variables d'environnement
 load_dotenv()
@@ -32,33 +33,42 @@ import json
 
 # ... (rest of imports)
 
-# Fonction Tool pour récupérer les news
-def get_epitech_news():
+# Fonction Tool pour récupérer les news (ASYNC - non-bloquante)
+async def get_epitech_news():
     try:
-        # Chemin absolu vers le projet scrapy - A adapter selon votre structure précise
         scraper_path = os.path.join(os.path.dirname(__file__), "../MCP_Server/epitech_scraper")
         
-        # Lancer le spider et sortir le résultat dans un fichier temporaire (ou stdout)
-        # Ici on écrase news.json à chaque fois pour avoir du frais
-        subprocess.run(["python", "-m", "scrapy", "crawl", "epitech_news", "-O", "news.json"], 
-                       cwd=scraper_path, check=True, capture_output=True)
+        # CORRECTION 1 & 2 : On utilise asyncio pour ne pas bloquer
+        # et on récupère la sortie standard (stdout) au lieu d'écrire un fichier
+        process = await asyncio.create_subprocess_exec(
+            "python", "-m", "scrapy", "crawl", "epitech_news", "-O", "-", "-t", "json",
+            cwd=scraper_path,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
         
-        # Lire le fichier json
-        with open(os.path.join(scraper_path, "news.json"), "r", encoding="utf-8") as f:
-            news_data = json.load(f)
+        # On attend la fin sans bloquer le serveur
+        stdout, stderr = await process.communicate()
+        
+        if process.returncode != 0:
+            print(f"Scrapy Error: {stderr.decode()}")
+            return "Désolé, impossible de récupérer les actualités pour le moment."
+
+        # On lit le JSON directement depuis la mémoire (stdout)
+        news_data = json.loads(stdout.decode())
             
-        # Formater pour l'IA
         formatted_news = "Voici les dernières actualités Epitech récupérées en direct :\n"
-        for item in news_data[:3]: # Top 3
-            title = item['title'].strip() if item['title'] else "Sans titre"
-            summary = item['summary'].strip() if item['summary'] else ""
-            link = item['link']
+        for item in news_data[:3]:
+            title = item.get('title', 'Sans titre').strip()
+            summary = item.get('summary', '').strip()
+            link = item.get('link', '#')
             formatted_news += f"- {title}: {summary} (Source: {link})\n"
             
         return formatted_news
 
     except Exception as e:
-        return f"Erreur lors de la récupération des news : {str(e)}"
+        print(f"Erreur News: {str(e)}")
+        return "Erreur technique lors de la récupération des news."
 
 # ... (existing imports)
 
@@ -217,7 +227,7 @@ async def chat_endpoint(request: ChatRequest):
     # Tool 1: News Scraper
     if any(k in msg_lower for k in keywords_news) and "epitech" in msg_lower:
         print("🔍 Tool Activation: Scraper Epitech News")
-        news_info = get_epitech_news()
+        news_info = await get_epitech_news()  # AWAIT pour ne pas bloquer
         context_extra += f"\n\n[SYSTÈME: DONNÉES LIVE INJECTÉES]\n{news_info}\nUtilise ces informations pour répondre."
         backend_source += " + Scraper"
 
@@ -226,10 +236,19 @@ async def chat_endpoint(request: ChatRequest):
     location_query = None
     
     # SAFEGUARD : Ne pas déclencher l'outil si l'utilisateur parle juste d'Epitech en général
-    # (évite "parle moi de la méthodologie epitech" → géolocalisation)
+    # ou exprime simplement une réaction
     non_location_keywords = ["méthodologie", "methodologie", "pédagogie", "pedagogie", "programme", 
                              "cursus", "formation", "apprentissage", "méthode", "enseignement",
-                             "apprentissage", "étude", "cours", "diplome", "diplôme"]
+                             "apprentissage", "étude", "cours", "diplome", "diplôme",
+                             # Réactions positives/négatives (pas de contexte géographique)
+                             "intéressant", "interessant", "cool", "sympa", "super", "génial",
+                             "l'air", "lair", "semble", "parait", "paraît"]
+    
+    # Mots à rejeter si capturés par la regex (faux positifs courants)
+    invalid_location_words = {"l", "la", "le", "les", "un", "une", "des", "air", "lair", "l'air",
+                               "bien", "mal", "bon", "bonne", "très", "trop", "peu", "plus",
+                               "être", "etre", "avoir", "fait", "faire", "dit", "dire",
+                               "intéressant", "interessant", "cool", "sympa", "super"}
     
     is_general_epitech_question = any(kw in msg_lower for kw in non_location_keywords)
     
@@ -239,13 +258,16 @@ async def chat_endpoint(request: ChatRequest):
         if zip_match:
             location_query = zip_match.group(0)
         else:
-            # 2. Regex Ville STRICTE (avec prépositions géographiques claires)
-            # Accepte: "habite à Lyon", "suis de Metz", "à Bordeaux", "vers Lille"
-            city_match = re.search(r'(?i)(?:habite|vis|suis|viens)\s+(?:à|a|de|d\')?\s*([a-zA-Z\u00C0-\u00FF\-]+)|(?:à|a|vers|sur)\s+([a-zA-Z\u00C0-\u00FF\-]+)', request.message)
+            # 2. Regex Ville STRICTE - Exige un verbe de localisation AVANT
+            # "habite à Lyon", "suis de Metz", "viens de Bordeaux", "vis à Lille"
+            city_match = re.search(r'(?i)\b(?:habite|vis|viens|suis)\s+(?:à|a|de|d\')\s*([a-zA-Z\u00C0-\u00FF]{3,})\b', request.message)
             if city_match:
-                # Prendre le premier groupe non-vide
-                location_query = (city_match.group(1) or city_match.group(2)).strip()
-            else:
+                candidate = city_match.group(1).strip().lower()
+                # Valider que ce n'est pas un faux positif
+                if candidate not in invalid_location_words:
+                    location_query = city_match.group(1).strip()
+            
+            if not location_query:
                 # 3. Cas spécifique : "campus [ville]" ou "Epitech [ville]" mais SEULEMENT si [ville] est connue
                 campus_city_match = re.search(r'(?i)(?:campus|epitech)\s+([a-zA-Z\u00C0-\u00FF\-]+)', request.message)
                 if campus_city_match:
