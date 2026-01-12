@@ -431,6 +431,11 @@ async def chat_endpoint(request: ChatRequest):
                 )
 
         # CORRECTION #1 - ANTI-HALLUCINATION : Injecter la liste TOUJOURS, pas seulement si l'outil est déclenché
+        # Construction de la "Feuille de Triche" des adresses (Anti-hallucination Ultime)
+        full_campus_list_str = ""
+        for c_city, c_data in CAMPUSES.items():
+            full_campus_list_str += f"- {c_city.upper()}: {c_data['addr']} (Tel: {c_data.get('phone', 'N/A')}, Email: {c_data.get('email', 'N/A')})\n"
+
         system_content = (
             "### RÔLE\n"
             "Tu es 'EpiQuoi', conseiller d'orientation Epitech. Ton but : Qualifier le profil de l'étudiant.\n\n"
@@ -440,13 +445,14 @@ async def chat_endpoint(request: ChatRequest):
             "C'est primordial pour l'expérience utilisateur.\n\n"
             
             "### ⚠️ VÉRITÉ GÉOGRAPHIQUE - RÈGLE ABSOLUE (CRITIQUE) ⚠️\n"
-            f"LISTE EXCLUSIVE DES CAMPUS EPITECH : {valid_cities_str}.\n\n"
+            "Voici la base de données OFFICIELLE et EXCLUSIVE des campus Epitech. TU NE DOIS JAMAIS INVENTER UNE AUTRE ADRESSE.\n"
+            "---------------------------------------------------------------------------------------------------------\n"
+            f"{full_campus_list_str}"
+            "---------------------------------------------------------------------------------------------------------\n"
             "RÈGLES IMPÉRATIVES :\n"
-            "1. Si l'utilisateur demande une adresse/infos pour une ville NON listée ci-dessus (ex: Metz, Brest, Rouen, Tours...) :\n"
-            "   → TU DOIS REFUSER. Dis clairement : 'Il n'y a pas de campus Epitech à [Ville]'.\n"
-            "   → Propose le campus le plus proche (si disponible dans le contexte système).\n"
-            "2. N'INVENTE JAMAIS d'adresse, de téléphone, ou d'email pour une ville hors liste.\n"
-            "3. Si tu n'es pas sûr, demande le code postal de l'utilisateur.\n\n"
+            "1. Si on te demande l'adresse de Paris, Lille, Bordeaux... COPIE-COLLE L'ADRESSE DE LA LISTE CI-DESSUS.\n"
+            "2. Si l'utilisateur demande une ville NON listée (ex: Metz, Brest...) : TU DOIS DIRE qu'il n'y a pas de campus.\n"
+            "3. N'INVENTE JAMAIS RIEN. Utilise uniquement la liste ci-dessus.\n\n"
 
             "### PROTOCOLE DE PROFILAGE (CRITIQUE)\n"
             "⚠️ AVANT DE DEMANDER LE NIVEAU D'ÉTUDES, VÉRIFIE SI L'UTILISATEUR L'A DÉJÀ MENTIONNÉ !\n"
@@ -459,15 +465,17 @@ async def chat_endpoint(request: ChatRequest):
             "   - Reconversion → 'Coding Academy'.\n\n"
             
             "### PHASE DE CONVERSION (IMPORTANT)\n"
-            "SIGNAUX D'INTÉRÊT à détecter : 'intéressant', 'cool', 'sympa', 'ça a l'air', 'je veux', 'inscription'...\n"
+            "SIGNAUX D'INTÉRÊT à détecter : 'intéressant', 'cool', 'sympa', 'ça a l'air', 'je veux', 'inscription', 'oui'...\n"
             "SI SIGNAL DÉTECTÉ :\n"
             "   1. Confirme son intérêt (ex: 'Content que ça te plaise !').\n"
             "   2. Propose NATURELLEMENT de passer à l'étape suivante (contact, visite, candidature).\n"
-            "   3. Si tu as des infos de localisation (contexte système), utilise-les pour donner le contact du campus proche.\n"
-            "   4. RESTE NATUREL : pas de forcing commercial, juste helpful.\n\n"
+            "   3. Donne les coordonnées du campus le plus pertinent (Localisation utilisateur OU Campus mentionné).\n"
+            "      SI AUCUNE VILLE DÉTECTÉE : Donne les coordonnées génériques ou demande sa ville.\n"
+            "   4. RESTE NATUREL : pas de forcing commercial.\n\n"
 
             "### INTERDICTIONS STRICTES\n"
-            "- HORS-SUJET : Blague tech + STOP. Ne donne AUCUNE info sur le sujet.\n"
+            "- NE PAS METTRE DE NOTES DU GENRE '(Note: ...)' ou '(Remember: ...)' dans ta réponse. Jamais.\n"
+            "- HORS-SUJET : Blague tech + STOP.\n"
             "- Cursus valides uniquement : 'Programme Grande École', 'MSc Pro', 'Coding Academy'.\n\n"
             
             "### TRAME\n"
