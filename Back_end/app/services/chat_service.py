@@ -130,18 +130,28 @@ class ChatService:
                 campus_data = await self.campus_service.get_campus_info()
                 
                 if campus_data:
-                    print("   ✓ Scraping campus terminé avec succès")
+                    # Vérifier si c'est une liste ou un dict avec erreur
+                    if isinstance(campus_data, list):
+                        print(f"   ✓ Scraping campus terminé : {len(campus_data)} campus détectés par le scraper")
+                    else:
+                        print(f"   ⚠️ Format de données inattendu : {type(campus_data)}")
                     
                     # Optimize data to prevent context overflow (OOM)
                     optimized_data = self._optimize_campus_data(campus_data)
-                    print(f"   ✓ Données optimisées : {len(optimized_data)} campus conservés")
+                    print(f"   ✓ Données optimisées : {len(optimized_data)} campus conservés après filtrage")
                     
-                    import json
+                    # Convert to text to save tokens (JSON is too heavy)
+                    campus_text = self._format_campus_to_text(optimized_data)
+                    
+                    total_campus = len(optimized_data)
                     context_extra += (
-                        f"\n\n[SYSTÈME: DONNÉES CAMPUS LIVE]\n"
-                        f"Voici les données fraîches des campus récupérées via Scrapy (Format JSON simplifié) :\n"
-                        f"{json.dumps(optimized_data, ensure_ascii=False)}\n"
-                        f"Utilise ces données pour répondre précisément sur les formations et villes disponibles."
+                        f"\n\n[SYSTÈME: DONNÉES CAMPUS LIVE - {total_campus} CAMPUS TROUVÉS]\n"
+                        f"⚠️ IMPORTANT : Il y a EXACTEMENT {total_campus} campus dans cette liste. "
+                        f"Tu DOIS tous les mentionner si on te demande de lister les campus.\n\n"
+                        f"Liste complète des campus ({total_campus}) :\n"
+                        f"{campus_text}\n\n"
+                        f"Si on te demande combien il y a de campus, réponds : {total_campus}. "
+                        f"Si on te demande de les lister, cite TOUS les {total_campus} campus de la liste ci-dessus."
                     )
                     backend_source += " + Scraper Campus"
                 else:
@@ -251,6 +261,18 @@ class ChatService:
             logger.error(f"Unexpected error in chat service: {e}")
             raise OllamaError(f"Failed to process chat: {str(e)}")
 
+    def _format_campus_to_text(self, data: List[Dict]) -> str:
+        """Format optimized campus data into a compact text list."""
+        lines = []
+        for idx, c in enumerate(data, 1):
+            ville = c['ville'].upper()
+            pays = c['pays']
+            forms = ", ".join(c['formations'][:3]) if c['formations'] else "Toutes formations"  # Limiter à 3 formations max
+            if len(c['formations']) > 3:
+                forms += f" (+{len(c['formations']) - 3} autres)"
+            lines.append(f"{idx}. {ville} ({pays}) : {forms}")
+        return "\n".join(lines)
+
     def _optimize_campus_data(self, data: List[Dict]) -> List[Dict]:
         """Optimize and filter campus data to reduce token usage."""
         optimized = []
@@ -294,8 +316,9 @@ class ChatService:
                     seen_names.add(name)
                     opt_campus["formations"].append(name)
             
-            # Add to list if valid location
-            if opt_campus["ville"]:
+            # Add to list if valid location (on exclut les faux "campus" génériques type 'Apres Bac')
+            ville_val = opt_campus["ville"]
+            if ville_val and ville_val.lower() not in {"apres bac", "après bac"}:
                 optimized.append(opt_campus)
                  
         return optimized

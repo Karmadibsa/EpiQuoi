@@ -11,58 +11,124 @@ class CampusSpider(scrapy.Spider):
     ]
 
     def parse(self, response):
+        seen_urls = set()  # Utiliser les URLs pour éviter les doublons, pas le texte
         seen_cities = set()
         
         excluded_words = [
             "valeurs", "pédagogie", "engagements", "direction", 
             "groupe", "group", "associative", "bac", "après", "tech",
-            "ionis", "education", "ancien", "alumni", "contact", "digital"
+            "ionis", "education", "ancien", "alumni", "contact", "digital",
+            "voir", "plus", "découvrir", "en savoir", "lire", "cliquez"
         ]
+
+        # Liste des villes Epitech connues pour validation
+        known_cities = {
+            "paris", "lyon", "marseille", "toulouse", "nice", "nantes", "strasbourg",
+            "montpellier", "bordeaux", "lille", "rennes", "nancy", "mulhouse",
+            "moulins", "la réunion", "saint-andré", "abidjan", "cotonou",
+            "berlin", "madrid", "barcelone", "bruxelles", "tirana"
+        }
 
         # On garde notre logique de détection des pays qui marche bien
         for link in response.css('a'):
             url = link.css('::attr(href)').get()
             text = link.css('::text').get()
             
-            if not url or not text: continue
-
-            clean_text = text.strip()
-            text_lower = clean_text.lower()
-            url_lower = url.lower()
-
-            if any(word in text_lower for word in excluded_words): continue
+            if not url: continue
             
+            # Normaliser l'URL (enlever les fragments, paramètres, etc.)
+            url_clean = url.split('#')[0].split('?')[0]
+            url_lower = url_clean.lower()
+            
+            # On ignore explicitement toutes les pages "après-bac" qui ne sont PAS des campus physiques
+            # Exemple : /ecole-informatique-apres-bac/..., pages pédagogie, engagements, etc.
+            if "ecole-informatique-apres-bac" in url_lower or "apres-bac" in url_lower or "après-bac" in url_lower:
+                continue
+            
+            # Skip si déjà vu
+            if url_clean in seen_urls: continue
+            
+            # Détection basée sur l'URL (plus fiable que le texte)
             pays = None
             is_campus = False
+            ville = None
 
-            if ".es" in url_lower or "madrid" in text_lower or "barcelone" in text_lower or "spain" in url_lower:
+            # Campus internationaux
+            if ".es" in url_lower or "epitech-it.es" in url_lower:
                 pays = "Espagne"
                 is_campus = True
-            elif ".de" in url_lower or "berlin" in text_lower or "germany" in url_lower:
+                if "madrid" in url_lower:
+                    ville = "Madrid"
+                elif "barcelone" in url_lower or "barcelona" in url_lower:
+                    ville = "Barcelone"
+                else:
+                    ville = "Barcelone"  # Par défaut
+            elif ".de" in url_lower or "epitech-it.de" in url_lower or "berlin" in url_lower:
                 pays = "Allemagne"
                 is_campus = True
-            elif ".be" in url_lower or "bruxelles" in text_lower or "belgium" in url_lower:
+                ville = "Berlin"
+            elif ".be" in url_lower or "epitech-it.be" in url_lower or "bruxelles" in url_lower:
                 pays = "Belgique"
                 is_campus = True
-            elif ".bj" in url_lower or "cotonou" in text_lower or "benin" in url_lower:
+                ville = "Bruxelles"
+            elif ".bj" in url_lower or "epitech.bj" in url_lower or "cotonou" in url_lower:
                 pays = "Bénin"
                 is_campus = True
-            elif "tirana" in text_lower or "albanie" in url_lower:
+                ville = "Cotonou"
+            elif "tirana" in url_lower or "albanie" in url_lower:
                 pays = "Albanie"
                 is_campus = True
-            elif "/campus-" in url_lower or "/ecole-" in url_lower:
-                if not pays: 
-                    pays = "France"
-                    is_campus = True
+                ville = "Tirana"
+            # Campus français - patterns plus larges
+            elif "/campus-" in url_lower or "/ecole-informatique-" in url_lower:
+                pays = "France"
+                is_campus = True
+                # Extraire le nom de la ville depuis l'URL
+                if "/campus-" in url_lower:
+                    ville_part = url_lower.split("/campus-")[-1].split("/")[0]
+                elif "/ecole-informatique-" in url_lower:
+                    ville_part = url_lower.split("/ecole-informatique-")[-1].split("/")[0]
+                else:
+                    ville_part = None
+                
+                if ville_part:
+                    # Nettoyer et capitaliser
+                    ville = ville_part.replace("-", " ").title()
+                    # Cas spéciaux
+                    if "saint-andre" in ville_part or "reunion" in ville_part:
+                        ville = "La Réunion"
+                    elif "abidjan" in ville_part:
+                        pays = "Côte d'Ivoire"
+                        ville = "Abidjan"
 
-            if is_campus and len(clean_text) > 2 and len(clean_text) < 30:
-                if clean_text not in seen_cities:
-                    seen_cities.add(clean_text)
+            # Si pas de ville depuis l'URL, essayer depuis le texte
+            if is_campus and not ville and text:
+                clean_text = text.strip()
+                text_lower = clean_text.lower()
+                
+                # Filtrer les mots exclus
+                if any(word in text_lower for word in excluded_words): 
+                    continue
+                
+                # Vérifier si c'est une ville connue
+                if clean_text.lower() in known_cities or any(city in text_lower for city in known_cities):
+                    ville = clean_text
+                elif len(clean_text) > 2 and len(clean_text) < 30:
+                    # Accepter si ça ressemble à un nom de ville
+                    ville = clean_text
+
+            # Si on a détecté un campus valide
+            if is_campus and ville:
+                # Utiliser l'URL comme clé unique pour éviter les doublons
+                if url_clean not in seen_urls:
+                    seen_urls.add(url_clean)
+                    seen_cities.add(ville.lower())
                     # On suit le lien pour aller chercher les détails
                     yield response.follow(
-                        url, 
+                        url_clean, 
                         callback=self.parse_details, 
-                        cb_kwargs={'ville': clean_text, 'pays': pays, 'url_base': url}
+                        cb_kwargs={'ville': ville, 'pays': pays, 'url_base': url_clean},
+                        dont_filter=True
                     )
 
     def parse_details(self, response, ville, pays, url_base):
