@@ -34,13 +34,23 @@ const ChatInterface = () => {
                     <img src="/logo-noir.png" alt="Epitech Logo" className="h-8 md:h-10 w-auto" />
                 </div>
 
-                <button
-                    onClick={() => window.location.reload()}
-                    className="group flex items-center gap-2 px-4 py-2 border border-slate-200 rounded-none hover:bg-epitech-blue hover:text-white transition-all duration-300 bg-white/50 backdrop-blur"
-                >
-                    <RotateCcw size={16} className="group-hover:-rotate-180 transition-transform duration-500" />
-                    <span className="font-heading uppercase text-sm tracking-wider">RESET_</span>
-                </button>
+                <div className="flex items-center gap-4">
+                    {import.meta.env.VITE_SHOWCASE_URL && (
+                        <a
+                            href={import.meta.env.VITE_SHOWCASE_URL}
+                            className="hidden md:flex items-center gap-2 text-xs font-heading font-bold tracking-widest text-slate-400 hover:text-epitech-blue transition-colors mr-4"
+                        >
+                            VOIR LE SITE VITRINE
+                        </a>
+                    )}
+                    <button
+                        onClick={() => window.location.reload()}
+                        className="group flex items-center gap-2 px-4 py-2 border border-slate-200 rounded-none hover:bg-epitech-blue hover:text-white transition-all duration-300 bg-white/50 backdrop-blur"
+                    >
+                        <RotateCcw size={16} className="group-hover:-rotate-180 transition-transform duration-500" />
+                        <span className="font-heading uppercase text-sm tracking-wider">RESET_</span>
+                    </button>
+                </div>
             </div>
 
             {/* Main Content Area */}
