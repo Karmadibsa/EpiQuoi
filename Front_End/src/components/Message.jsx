@@ -1,7 +1,7 @@
 import React from 'react';
 import { motion } from 'framer-motion';
 
-const Message = ({ message }) => {
+const Message = ({ message, isWidget = false }) => {
     const isUser = message.sender === 'user';
     // Use custom name if User, else EPIQUOI
     const senderName = isUser ? (message.userName || 'USER_') : 'EPIQUOI_';
@@ -12,16 +12,17 @@ const Message = ({ message }) => {
             animate={{ opacity: 1, y: 0 }}
             className={`flex w-full ${isUser ? 'justify-end' : 'justify-start'} group`}
         >
-            <div className={`max-w-[90%] md:max-w-[70%] flex flex-col ${isUser ? 'items-end' : 'items-start'}`}>
+            <div className={`max-w-[90%] md:max-w-[85%] flex flex-col ${isUser ? 'items-end' : 'items-start'}`}>
 
                 {/* Sender Label */}
-                <span className={`font-heading text-sm mb-1 uppercase tracking-wider ${isUser ? 'text-epitech-blue' : 'text-epitech-pink'}`}>
+                <span className={`font-heading mb-1 uppercase tracking-wider ${isWidget ? 'text-[10px]' : 'text-sm'} ${isUser ? 'text-epitech-blue' : 'text-epitech-pink'}`}>
                     {senderName}
                 </span>
 
                 {/* Bubble */}
                 <div className={`
-             relative px-6 py-4 text-base md:text-lg leading-relaxed font-body shadow-sm
+             relative leading-relaxed font-body shadow-sm
+             ${isWidget ? 'px-4 py-2 text-sm' : 'px-6 py-4 text-base md:text-lg'}
              ${isUser
                         ? 'bg-epitech-blue text-white border-l-4 border-epitech-green'
                         : message.isError
