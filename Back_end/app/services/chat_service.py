@@ -18,6 +18,7 @@ if settings.ollama_url:
 from app.exceptions import OllamaError
 from app.models.schemas import ChatRequest, MessageHistory
 from app.services.news_service import NewsService
+from app.services.campus_service import CampusService
 from app.services.geocoding_service import GeocodingService
 from app.utils.campus_data import CAMPUSES, CITY_ALIASES, format_campus_list
 from app.utils.language_detection import detect_language
@@ -31,6 +32,7 @@ class ChatService:
     def __init__(self):
         """Initialize chat service with dependencies."""
         self.news_service = NewsService()
+        self.campus_service = CampusService()
         self.geocoding_service = GeocodingService()
 
     # Keywords for intent detection
@@ -106,19 +108,48 @@ class ChatService:
             msg_lower = request.message.lower()
 
             # Tool 1: News Scraper
-            print("🔍 [2/6] Vérification si scraper nécessaire...")
+            print("🔍 [2/6] Vérification si scraper NEWS nécessaire...")
             if self._should_fetch_news(msg_lower):
-                print("   ⚡ SCRAPER ACTIVÉ - Démarrage du scraping...")
+                print("   ⚡ SCRAPER NEWS ACTIVÉ - Démarrage...")
                 logger.info("Tool Activation: Scraper Epitech News")
                 news_info = await self.news_service.get_epitech_news()
-                print("   ✓ Scraping terminé avec succès")
+                print("   ✓ Scraping news terminé avec succès")
                 context_extra += (
                     f"\n\n[SYSTÈME: DONNÉES LIVE INJECTÉES]\n"
                     f"{news_info}\nUtilise ces informations pour répondre."
                 )
-                backend_source += " + Scraper"
+                backend_source += " + Scraper News"
             else:
-                print("   → Pas de scraper nécessaire")
+                print("   → Pas de scraper news nécessaire")
+
+            # Tool 1.5: Campus Scraper (Live)
+            print("🔍 [2.5/6] Vérification demande scraping campus...")
+            if self._should_fetch_campus_data(msg_lower):
+                print("   ⚡ SCRAPER CAMPUS ACTIVÉ - Démarrage...")
+                logger.info("Tool Activation: Scraper Campus")
+                campus_data = await self.campus_service.get_campus_info()
+                
+                if campus_data:
+                    print("   ✓ Scraping campus terminé avec succès")
+                    
+                    # Optimize data to prevent context overflow (OOM)
+                    optimized_data = self._optimize_campus_data(campus_data)
+                    print(f"   ✓ Données optimisées : {len(optimized_data)} campus conservés")
+                    
+                    # Convert to text to save tokens (JSON is too heavy)
+                    campus_text = self._format_campus_to_text(optimized_data)
+                    
+                    context_extra += (
+                        f"\n\n[SYSTÈME: DONNÉES CAMPUS LIVE]\n"
+                        f"Voici les données fraîches des campus (Format Liste Compacte) :\n"
+                        f"{campus_text}\n"
+                        f"Utilise ces données pour répondre précisément sur les formations et villes disponibles."
+                    )
+                    backend_source += " + Scraper Campus"
+                else:
+                    print("   ⚠️ Échec du scraping campus")
+            else:
+                print("   → Pas de scraping campus demandé")
 
             # Tool 2: Campus Finder
             print("🔍 [3/6] Détection de localisation...")
@@ -222,12 +253,92 @@ class ChatService:
             logger.error(f"Unexpected error in chat service: {e}")
             raise OllamaError(f"Failed to process chat: {str(e)}")
 
+    def _format_campus_to_text(self, data: List[Dict]) -> str:
+        """Format optimized campus data into a compact text list."""
+        lines = []
+        for c in data:
+            ville = c['ville'].upper()
+            pays = c['pays']
+            forms = ", ".join(c['formations']) if c['formations'] else "Toutes formations"
+            lines.append(f"- {ville} ({pays}) : {forms}")
+        return "\n".join(lines)
+
+    def _optimize_campus_data(self, data: List[Dict]) -> List[Dict]:
+        """Optimize and filter campus data to reduce token usage."""
+        optimized = []
+        if not isinstance(data, list):
+            return []
+
+        for campus in data:
+            if not isinstance(campus, dict): continue
+            
+            # Filter out error messages if any
+            if "error" in campus: continue
+
+            # Simple filtered object
+            opt_campus = {
+                "ville": campus.get("ville"),
+                "pays": campus.get("pays"),
+                "formations": []
+            }
+            
+            # Filter formations
+            raw_formations = campus.get("formations_disponibles", [])
+            seen_names = set()
+            
+            for fmt in raw_formations:
+                if not isinstance(fmt, dict): continue
+                name = fmt.get("nom", "")
+                name_lower = name.lower()
+                
+                # Filter out irrelevant marketing/contact titles (Noise reduction)
+                if any(bad in name_lower for bad in [
+                    "où étudier", "plan d’accès", "choisir l’école", "contact", 
+                    "informations", "télécharger", "brochure", "plus qu’une école",
+                    "nos formations", "nos campus"
+                ]):
+                    continue
+                    
+                # Keep relevant academic programs
+                if any(k in name_lower for k in ["programme", "bachelor", "master", "msc", "coding", "w@c", "web@cadémie", "bootcamp", "pge", "grande ecole", "grande école"]):
+                    # Deduplicate
+                    if name in seen_names: continue
+                    seen_names.add(name)
+                    opt_campus["formations"].append(name)
+            
+            # Add to list if valid location
+            if opt_campus["ville"]:
+                optimized.append(opt_campus)
+                 
+        return optimized
+
     def _should_fetch_news(self, msg_lower: str) -> bool:
         """Check if news should be fetched based on message content."""
         return (
             any(k in msg_lower for k in self.NEWS_KEYWORDS)
             and "epitech" in msg_lower
+            and "epitech" in msg_lower
         )
+
+    def _should_fetch_campus_data(self, msg_lower: str) -> bool:
+        """Check if campus scraping should be triggered."""
+        # 1. Explicit scraping request
+        if "scraper" in msg_lower or "scraping" in msg_lower:
+            return True
+
+        # 2. Keywords related to location/campuses
+        topic_keywords = ["campus", "école", "ecole", "ville", "implantation", "site", "formations"]
+        if not any(k in msg_lower for k in topic_keywords):
+            return False
+
+        # 3. Action keywords or context
+        # "cite", "liste", "quelles" allow matching "Cite moi...", "Liste les...", "Quelles sont..."
+        action_keywords = [
+            "epitech", "lister", "liste", "cite", "citer", "donne", "donner",
+            "voir", "montre", "montrer", "quels", "quelles", "quel", "quelle",
+            "ou", "où", "trouver", "sont", "est", "il y a"
+        ]
+        return any(k in msg_lower for k in action_keywords)
 
     async def _process_location_detection(
         self, message: str, msg_lower: str

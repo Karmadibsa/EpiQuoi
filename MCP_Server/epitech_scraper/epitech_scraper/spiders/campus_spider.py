@@ -62,7 +62,8 @@ class CampusSpider(scrapy.Spider):
                     yield response.follow(
                         url, 
                         callback=self.parse_details, 
-                        cb_kwargs={'ville': clean_text, 'pays': pays, 'url_base': url}
+                        cb_kwargs={'ville': clean_text, 'pays': pays, 'url_base': url},
+                        dont_filter=True
                     )
 
     def parse_details(self, response, ville, pays, url_base):
@@ -72,7 +73,7 @@ class CampusSpider(scrapy.Spider):
         formations_list = []
         
         # J'ai ajouté 'mba', 'pre-msc' suite à ton image
-        keywords = ["programme", "bachelor", "master", "msc", "cursus", "formation", "bootcamp", "coding academy", "mba"]
+        keywords = ["campus","programme", "bachelor", "master", "msc", "cursus", "formation", "bootcamp", "coding academy", "mba"]
         
         # STRATEGIE 1 : Les Titres (H1-H4)
         for title in response.css('h1, h2, h3, h4'):
