@@ -11,8 +11,9 @@ class CampusSpider(scrapy.Spider):
     ]
 
     def parse(self, response):
-        seen_urls = set()  # Utiliser les URLs pour éviter les doublons, pas le texte
+        seen_items = set()  # Utiliser (url, ville) pour éviter les doublons
         seen_cities = set()
+        seen_urls = set()  # Pour éviter de traiter plusieurs fois la même URL
         
         excluded_words = [
             "valeurs", "pédagogie", "engagements", "direction", 
@@ -39,6 +40,7 @@ class CampusSpider(scrapy.Spider):
             # Normaliser l'URL (enlever les fragments, paramètres, etc.)
             url_clean = url.split('#')[0].split('?')[0]
             url_lower = url_clean.lower()
+            # print(f"DEBUG: Checking {url_lower}")
             
             # On ignore explicitement toutes les pages "après-bac" qui ne sont PAS des campus physiques
             # Exemple : /ecole-informatique-apres-bac/..., pages pédagogie, engagements, etc.
@@ -61,8 +63,7 @@ class CampusSpider(scrapy.Spider):
                     ville = "Madrid"
                 elif "barcelone" in url_lower or "barcelona" in url_lower:
                     ville = "Barcelone"
-                else:
-                    ville = "Barcelone"  # Par défaut
+                # Remove default to allow text detection for Madrid
             elif ".de" in url_lower or "epitech-it.de" in url_lower or "berlin" in url_lower:
                 pays = "Allemagne"
                 is_campus = True
@@ -119,9 +120,11 @@ class CampusSpider(scrapy.Spider):
 
             # Si on a détecté un campus valide
             if is_campus and ville:
-                # Utiliser l'URL comme clé unique pour éviter les doublons
-                if url_clean not in seen_urls:
-                    seen_urls.add(url_clean)
+                print(f"DEBUG: Found Campus {ville} at {url_clean}")
+                # Utiliser (url, ville) comme clé unique
+                item_key = (url_clean, ville)
+                if item_key not in seen_items:
+                    seen_items.add(item_key)
                     seen_cities.add(ville.lower())
                     # On suit le lien pour aller chercher les détails
                     yield response.follow(

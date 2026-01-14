@@ -142,12 +142,14 @@ class ChatService:
                     
                     # Convert to text to save tokens (JSON is too heavy)
                     campus_text = self._format_campus_to_text(optimized_data)
+                    print(f"   ✓ Texte généré pour le prompt (DEBUG) :\n{campus_text}")
                     
                     total_campus = len(optimized_data)
                     context_extra += (
                         f"\n\n[SYSTÈME: DONNÉES CAMPUS LIVE - {total_campus} CAMPUS TROUVÉS]\n"
                         f"⚠️ IMPORTANT : Il y a EXACTEMENT {total_campus} campus dans cette liste. "
-                        f"Tu DOIS tous les mentionner si on te demande de lister les campus.\n\n"
+                        f"Tu DOIS tous les mentionner si on te demande de lister les campus.\n"
+                        f"Même si les formations sont identiques (ex: Madrid/Barcelone), CITE CHAQUE VILLE SÉPARÉMENT.\n\n"
                         f"Liste complète des campus ({total_campus}) :\n"
                         f"{campus_text}\n\n"
                         f"Si on te demande combien il y a de campus, réponds : {total_campus}. "
