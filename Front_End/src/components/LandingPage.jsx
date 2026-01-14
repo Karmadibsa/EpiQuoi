@@ -15,9 +15,19 @@ const LandingPage = () => {
                         <a href="#" className="font-heading text-sm font-bold tracking-widest hover:text-epitech-blue transition-colors">ENTREPRISES</a>
                         <a href="#" className="font-heading text-sm font-bold tracking-widest hover:text-epitech-blue transition-colors">ADMISSION</a>
                     </nav>
-                    <button className="bg-epitech-blue text-white px-6 py-2 font-heading font-bold text-sm tracking-wider hover:bg-epitech-dark transition-all">
-                        CANDIDATER_
-                    </button>
+                    <div className="flex gap-4">
+                        {import.meta.env.VITE_FULL_CHAT_URL && (
+                            <a
+                                href={import.meta.env.VITE_FULL_CHAT_URL}
+                                className="hidden md:block px-4 py-2 border border-slate-900 font-heading font-bold text-sm tracking-wider hover:bg-slate-50 transition-all"
+                            >
+                                MODE PLEIN ÉCRAN
+                            </a>
+                        )}
+                        <button className="bg-epitech-blue text-white px-6 py-2 font-heading font-bold text-sm tracking-wider hover:bg-epitech-dark transition-all">
+                            CANDIDATER_
+                        </button>
+                    </div>
                 </div>
             </header>
 
