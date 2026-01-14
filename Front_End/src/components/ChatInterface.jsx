@@ -1,94 +1,19 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React from 'react';
 import { ArrowRight, RotateCcw } from 'lucide-react';
 import Message from './Message';
-import { sendMessage } from '../services/api';
 import { DotGrid } from './DotGrid';
-
-const CAMPUSES = [
-    { city: 'Paris', zip: '94270', name: 'Paris-Kremlin-Bicêtre' },
-    { city: 'Lyon', zip: '69002', name: 'Lyon' },
-    { city: 'Bordeaux', zip: '33000', name: 'Bordeaux' },
-    { city: 'Toulouse', zip: '31000', name: 'Toulouse' },
-    { city: 'Nantes', zip: '44000', name: 'Nantes' },
-    { city: 'Lille', zip: '59000', name: 'Lille' },
-    { city: 'Strasbourg', zip: '67000', name: 'Strasbourg' },
-    { city: 'Rennes', zip: '35000', name: 'Rennes' },
-    { city: 'Marseille', zip: '13000', name: 'Marseille' },
-    { city: 'Nice', zip: '06000', name: 'Nice' },
-    { city: 'Montpellier', zip: '34000', name: 'Montpellier' },
-    { city: 'Nancy', zip: '54000', name: 'Nancy' },
-];
+import { useChat } from '../hooks/useChat';
 
 const ChatInterface = () => {
-    const [messages, setMessages] = useState([]);
-    const [input, setInput] = useState('');
-    const [isLoading, setIsLoading] = useState(false);
-    const [step, setStep] = useState('chat'); // chat, error_zip
-
-    const scrollRef = useRef(null);
-
-    useEffect(() => {
-        scrollRef.current?.scrollIntoView({ behavior: "smooth" });
-    }, [messages, isLoading, step]);
-
-    const handleSend = async (textOverride) => {
-        const textToSend = typeof textOverride === 'string' ? textOverride : input;
-        if (!textToSend.trim() || isLoading) return;
-
-        if (typeof textOverride !== 'string' && textOverride?.preventDefault) {
-            textOverride.preventDefault();
-        }
-
-        // Step: Zip Code Entry (Fallback Mode)
-        if (step === 'error_zip') {
-            const userMsg = { id: Date.now(), text: textToSend, sender: 'user' };
-            setMessages(prev => [...prev, userMsg]);
-            setInput('');
-            setIsLoading(true);
-
-            // Mock Campus Lookup
-            setTimeout(() => {
-                const found = CAMPUSES.find(c => textToSend.startsWith(c.zip.slice(0, 2)));
-                let responseText = "";
-                if (found) {
-                    responseText = `Le campus **Epitech ${found.name}** semble être le plus proche (${found.zip}). \n\n Vous pouvez les contacter directement pour plus d'informations sur le programme.`;
-                } else {
-                    responseText = "Je n'ai pas trouvé de correspondance exacte, mais Epitech est présent dans toute la France. Je vous invite à consulter la carte sur le site officiel.";
-                }
-
-                // System message - reset to chat but maybe keep history or reset context?
-                // User requested loop: asking zip, giving result. 
-                setMessages(prev => [...prev, { id: Date.now() + 1, text: responseText, sender: 'bot' }]);
-                setStep('chat');
-                setIsLoading(false);
-            }, 800);
-            return;
-        }
-
-        // Normal Chat Flow
-        const userMsg = { id: Date.now(), text: textToSend, sender: 'user' };
-        setMessages(prev => [...prev, userMsg]);
-        setInput('');
-        setIsLoading(true);
-
-        try {
-            // On envoie l'historique actuel avec le nouveau message
-            const response = await sendMessage(textToSend, messages);
-            const botMessage = { ...response, id: Date.now() + 1 };
-            setMessages(prev => [...prev, botMessage]);
-        } catch (error) {
-            // ERROR HANDLING -> Trigger Campus Fallback
-            setMessages(prev => [...prev, {
-                id: Date.now() + 1,
-                text: "⚠️ **Connexion au Cerveau Impossible** \n\n Je n'arrive pas à joindre le serveur. \n\n Pour vous aider, je peux chercher votre campus Epitech le plus proche. \n\n **Quel est votre Code Postal ?**",
-                sender: 'bot',
-                isError: true
-            }]);
-            setStep('error_zip');
-        } finally {
-            setIsLoading(false);
-        }
-    };
+    const {
+        messages,
+        input,
+        setInput,
+        isLoading,
+        step,
+        handleSend,
+        scrollRef
+    } = useChat();
 
     const Suggestion = ({ label, query }) => (
         <button
