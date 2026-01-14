@@ -39,10 +39,35 @@ async def run_scrapy_spider():
             return {"error": stderr.decode()}
         
         # On essaie de lire le JSON retourné par Scrapy
+        stdout_str = stdout.decode()
         try:
-            return json.loads(stdout.decode())
-        except:
-            return {"error": "Scrapy n'a pas renvoyé de JSON valide", "raw": stdout.decode()}
+            # Essayer de parser directement le JSON
+            parsed = json.loads(stdout_str)
+            # Si c'est une liste, la retourner directement
+            if isinstance(parsed, list):
+                return parsed
+            # Sinon retourner tel quel
+            return parsed
+        except json.JSONDecodeError:
+            # Si le JSON brut contient des lignes JSON (format Scrapy -O -:json)
+            # Essayer de parser ligne par ligne
+            lines = stdout_str.strip().split('\n')
+            results = []
+            for line in lines:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    parsed_line = json.loads(line)
+                    if isinstance(parsed_line, dict):
+                        results.append(parsed_line)
+                except json.JSONDecodeError:
+                    continue
+            
+            if results:
+                return results
+            else:
+                return {"error": "Scrapy n'a pas renvoyé de JSON valide", "raw": stdout_str}
             
     except Exception as e:
         return {"error": str(e)}
