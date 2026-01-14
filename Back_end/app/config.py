@@ -17,7 +17,12 @@ class Settings(BaseSettings):
 
     # CORS Configuration
     cors_origins: List[str] = Field(
-        default=["http://localhost:5173", "http://127.0.0.1:5173"],
+        default=[
+            "http://localhost:5173",
+            "http://127.0.0.1:5173",
+            "http://localhost:3000",
+            "http://127.0.0.1:3000"
+        ],
         description="Allowed CORS origins"
     )
     cors_allow_credentials: bool = True
