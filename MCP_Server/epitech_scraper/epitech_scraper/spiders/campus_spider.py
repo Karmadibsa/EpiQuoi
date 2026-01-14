@@ -72,7 +72,7 @@ class CampusSpider(scrapy.Spider):
         formations_list = []
         
         # J'ai ajouté 'mba', 'pre-msc' suite à ton image
-        keywords = ["programme", "bachelor", "master", "msc", "cursus", "formation", "bootcamp", "coding academy", "mba"]
+        keywords = ["campus","programme", "bachelor", "master", "msc", "cursus", "formation", "bootcamp", "coding academy", "mba"]
         
         # STRATEGIE 1 : Les Titres (H1-H4)
         for title in response.css('h1, h2, h3, h4'):

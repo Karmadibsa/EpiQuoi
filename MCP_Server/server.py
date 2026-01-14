@@ -15,16 +15,16 @@ app.add_middleware(
     allow_origins=["*"],  # On autorise tout le monde pour tester (plus simple)
     allow_credentials=True,
     allow_methods=["*"],
-    allow_headers=["*"],1
+    allow_headers=["*"],
 )
 
 # --- 2. LES OUTILS (TOOLS) ---
 
 async def run_scrapy_spider():
     """Lance le scraper et récupère le JSON"""
-    project_path = os.path.join(os.getcwd(), "epitech_scraper")
+    project_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "epitech_scraper")
     # Commande pour lancer le spider et sortir le résultat en JSON standard
-    command = "scrapy crawl campus_spider -O - --nolog"
+    command = "scrapy crawl campus_spider -O -:json --nolog"
     
     try:
         process = await asyncio.create_subprocess_shell(
@@ -53,6 +53,14 @@ async def run_scrapy_spider():
 @app.get("/")
 def read_root():
     return {"status": "Online", "message": "Le Cerveau Python est prêt 🧠"}
+
+@app.post("/scrape/campus")
+async def scrape_campus_endpoint():
+    """Trigger the campus spider and return JSON results."""
+    print("🕷️ Triggering Campus Spider via API...")
+    data = await run_scrapy_spider()
+    print(f"🕷️ [MCP] Scraper Data: {data}")
+    return data
 
 # Route CHAT (Celle qui bloquait en rouge sur ton écran)
 @app.post("/chat")
@@ -87,5 +95,5 @@ async def chat_endpoint(request: Request):
 
 # --- 4. LANCEMENT ---
 if __name__ == "__main__":
-    print("🚀 Serveur lancé sur http://localhost:8000")
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    print("🚀 Serveur lancé sur http://localhost:8001")
+    uvicorn.run(app, host="0.0.0.0", port=8001)
