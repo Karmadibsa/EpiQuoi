@@ -1,7 +1,9 @@
-fastapi==0.109.0
-uvicorn==0.27.0
-python-dotenv==1.0.1
+fastapi
+uvicorn
+python-dotenv
 ollama
-pydantic==2.6.0
-scrapy==2.11.0
+pydantic
+pydantic-settings
+scrapy
 httpx
+langdetect
