@@ -136,11 +136,13 @@ class ChatService:
                     optimized_data = self._optimize_campus_data(campus_data)
                     print(f"   ✓ Données optimisées : {len(optimized_data)} campus conservés")
                     
-                    import json
+                    # Convert to text to save tokens (JSON is too heavy)
+                    campus_text = self._format_campus_to_text(optimized_data)
+                    
                     context_extra += (
                         f"\n\n[SYSTÈME: DONNÉES CAMPUS LIVE]\n"
-                        f"Voici les données fraîches des campus récupérées via Scrapy (Format JSON simplifié) :\n"
-                        f"{json.dumps(optimized_data, ensure_ascii=False)}\n"
+                        f"Voici les données fraîches des campus (Format Liste Compacte) :\n"
+                        f"{campus_text}\n"
                         f"Utilise ces données pour répondre précisément sur les formations et villes disponibles."
                     )
                     backend_source += " + Scraper Campus"
@@ -250,6 +252,16 @@ class ChatService:
         except Exception as e:
             logger.error(f"Unexpected error in chat service: {e}")
             raise OllamaError(f"Failed to process chat: {str(e)}")
+
+    def _format_campus_to_text(self, data: List[Dict]) -> str:
+        """Format optimized campus data into a compact text list."""
+        lines = []
+        for c in data:
+            ville = c['ville'].upper()
+            pays = c['pays']
+            forms = ", ".join(c['formations']) if c['formations'] else "Toutes formations"
+            lines.append(f"- {ville} ({pays}) : {forms}")
+        return "\n".join(lines)
 
     def _optimize_campus_data(self, data: List[Dict]) -> List[Dict]:
         """Optimize and filter campus data to reduce token usage."""

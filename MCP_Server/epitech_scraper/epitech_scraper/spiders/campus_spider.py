@@ -62,7 +62,8 @@ class CampusSpider(scrapy.Spider):
                     yield response.follow(
                         url, 
                         callback=self.parse_details, 
-                        cb_kwargs={'ville': clean_text, 'pays': pays, 'url_base': url}
+                        cb_kwargs={'ville': clean_text, 'pays': pays, 'url_base': url},
+                        dont_filter=True
                     )
 
     def parse_details(self, response, ville, pays, url_base):
