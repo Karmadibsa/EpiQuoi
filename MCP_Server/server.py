@@ -22,9 +22,19 @@ app.add_middleware(
 
 async def run_scrapy_spider():
     """Lance le scraper et récupère le JSON"""
+    import tempfile
+    
     project_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "epitech_scraper")
-    # Commande pour lancer le spider et sortir le résultat en JSON standard
-    command = "scrapy crawl campus_spider -O -:json --nolog"
+    
+    # Utiliser un fichier temporaire pour éviter la pollution de stdout par les print()
+    temp_file = os.path.join(project_path, "temp_campus_output.json")
+    
+    # Supprimer le fichier s'il existe déjà
+    if os.path.exists(temp_file):
+        os.remove(temp_file)
+    
+    # Commande pour lancer le spider et sortir dans un fichier
+    command = f"scrapy crawl campus_spider -o {os.path.basename(temp_file)} --nolog"
     
     try:
         process = await asyncio.create_subprocess_shell(
@@ -36,16 +46,37 @@ async def run_scrapy_spider():
         stdout, stderr = await process.communicate()
         
         if process.returncode != 0:
-            return {"error": stderr.decode()}
+            error_msg = stderr.decode('utf-8', errors='replace')
+            return {"error": f"Scrapy error: {error_msg}"}
         
-        # On essaie de lire le JSON retourné par Scrapy
+        # Lire le fichier JSON généré
+        if not os.path.exists(temp_file):
+            return {"error": "Scraper completed but no output file was generated"}
+        
         try:
-            return json.loads(stdout.decode())
-        except:
-            return {"error": "Scrapy n'a pas renvoyé de JSON valide", "raw": stdout.decode()}
+            with open(temp_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            
+            # Nettoyer le fichier temporaire
+            os.remove(temp_file)
+            
+            return data
+            
+        except json.JSONDecodeError as e:
+            # En cas d'erreur, lire le contenu brut pour debug
+            with open(temp_file, 'r', encoding='utf-8') as f:
+                raw_content = f.read()[:500]
+            os.remove(temp_file)
+            return {"error": f"JSON decode error: {str(e)}", "raw": raw_content}
+        except Exception as e:
+            if os.path.exists(temp_file):
+                os.remove(temp_file)
+            return {"error": f"Unexpected error reading file: {str(e)}"}
             
     except Exception as e:
-        return {"error": str(e)}
+        if os.path.exists(temp_file):
+            os.remove(temp_file)
+        return {"error": f"Process error: {str(e)}"}
 
 # --- 3. LES ROUTES (Ce que React appelle) ---
 

@@ -120,7 +120,7 @@ class CampusSpider(scrapy.Spider):
 
             # Si on a détecté un campus valide
             if is_campus and ville:
-                print(f"DEBUG: Found Campus {ville} at {url_clean}")
+                # DEBUG: Found Campus {ville} at {url_clean} - Removed to avoid JSON pollution
                 # Utiliser (url, ville) comme clé unique
                 item_key = (url_clean, ville)
                 if item_key not in seen_items:
