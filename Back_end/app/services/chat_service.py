@@ -347,72 +347,40 @@ class ChatService:
                 campus_data = await tool_tasks["campus"]
                 
                 if campus_data:
-                    # Extraire la liste depuis le dict si nécessaire
-                    campus_list = None
-                    if isinstance(campus_data, list):
-                        campus_list = campus_data
-                        print(f"   ✓ Scraping campus terminé : {len(campus_list)} campus détectés par le scraper")
-                    elif isinstance(campus_data, dict):
-                        # Si le MCP Server a renvoyé un dict avec 'raw', parser le JSON brut
-                        if "raw" in campus_data:
-                            import json
-                            try:
-                                raw_str = campus_data["raw"]
-                                # Parser le JSON brut (peut être multi-lignes)
-                                lines = raw_str.strip().split('\n')
-                                campus_list = []
-                                for line in lines:
-                                    line = line.strip()
-                                    if not line or line.startswith('🔍'):  # Ignorer les lignes de debug
-                                        continue
-                                    try:
-                                        parsed = json.loads(line)
-                                        if isinstance(parsed, dict):
-                                            campus_list.append(parsed)
-                                    except json.JSONDecodeError:
-                                        continue
-                                if campus_list:
-                                    print(f"   ✓ Scraping campus terminé (depuis raw) : {len(campus_list)} campus détectés")
-                                else:
-                                    print(f"   ⚠️ Impossible de parser les données depuis 'raw'")
-                                    campus_list = []
-                            except Exception as e:
-                                print(f"   ⚠️ Erreur lors du parsing du JSON brut : {e}")
-                                campus_list = []
-                        elif "error" in campus_data:
-                            print(f"   ⚠️ Erreur du scraper : {campus_data.get('error')}")
-                            campus_list = []
-                        else:
-                            # Dict sans 'raw' ni 'error', peut-être une liste dans une clé ?
-                            campus_list = campus_data.get("data", campus_data.get("campuses", []))
-                            if not isinstance(campus_list, list):
-                                print(f"   ⚠️ Format de données inattendu : {type(campus_data)}")
-                                campus_list = []
-                    else:
-                        print(f"   ⚠️ Format de données inattendu : {type(campus_data)}")
-                        campus_list = []
-                    
-                    if not campus_list:
-                        print("   ⚠️ Aucune donnée campus disponible")
-                    else:
-                        # Optimize data to prevent context overflow (OOM)
-                        optimized_data = self._optimize_campus_data(campus_list)
-                        print(f"   ✓ Données optimisées : {len(optimized_data)} campus conservés après filtrage")
-                        
-                        # Convert to text to save tokens (JSON is too heavy)
-                        campus_text = self._format_campus_to_text(optimized_data)
-                        
-                        total_campus = len(optimized_data)
-                        context_extra += (
-                            f"\n\n[SYSTÈME: DONNÉES CAMPUS LIVE - {total_campus} CAMPUS TROUVÉS]\n"
-                            f"⚠️ IMPORTANT : Il y a EXACTEMENT {total_campus} campus dans cette liste. "
-                            f"Tu DOIS tous les mentionner si on te demande de lister les campus.\n\n"
-                            f"Liste complète des campus ({total_campus}) :\n"
-                            f"{campus_text}\n\n"
-                            f"Si on te demande combien il y a de campus, réponds : {total_campus}. "
-                            f"Si on te demande de les lister, cite TOUS les {total_campus} campus de la liste ci-dessus."
+                    # MCP returns {"data": [...], "meta": {...}}
+                    if isinstance(campus_data, dict) and isinstance(campus_data.get("data"), list):
+                        print(
+                            "   ✓ Scraping campus terminé : "
+                            f"{len(campus_data.get('data', []))} campus détectés (via MCP.data)"
                         )
-                        backend_source += " + Scraper Campus"
+                    elif isinstance(campus_data, list):
+                        print(f"   ✓ Scraping campus terminé : {len(campus_data)} campus détectés (list brute)")
+                    else:
+                        print(
+                            f"   ⚠️ Format de données inattendu : {type(campus_data)} "
+                            "(attendu: dict{data} ou list)"
+                        )
+                    
+                    # Optimize data to prevent context overflow (OOM)
+                    optimized_data = self._optimize_campus_data(campus_data)
+                    print(f"   ✓ Données optimisées : {len(optimized_data)} campus conservés après filtrage")
+                    
+                    # Convert to text to save tokens (JSON is too heavy)
+                    campus_text = self._format_campus_to_text(optimized_data)
+                    print(f"   ✓ Texte généré pour le prompt (DEBUG) :\n{campus_text}")
+                    
+                    total_campus = len(optimized_data)
+                    context_extra += (
+                        f"\n\n[SYSTÈME: DONNÉES CAMPUS LIVE - {total_campus} CAMPUS TROUVÉS]\n"
+                        f"⚠️ IMPORTANT : Il y a EXACTEMENT {total_campus} campus dans cette liste. "
+                        f"Tu DOIS tous les mentionner si on te demande de lister les campus.\n"
+                        f"Même si les formations sont identiques (ex: Madrid/Barcelone), CITE CHAQUE VILLE SÉPARÉMENT.\n\n"
+                        f"Liste complète des campus ({total_campus}) :\n"
+                        f"{campus_text}\n\n"
+                        f"Si on te demande combien il y a de campus, réponds : {total_campus}. "
+                        f"Si on te demande de les lister, cite TOUS les {total_campus} campus de la liste ci-dessus."
+                    )
+                    backend_source += " + Scraper Campus"
                 else:
                     print("   ⚠️ Échec du scraping campus")
             else:
