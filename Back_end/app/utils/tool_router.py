@@ -37,16 +37,26 @@ class ToolRouter:
         "cite",
         "citer",
         "ville",
+        "pays",
+        "international",
         "où",
         "ou",
         "adresse",
         "implantation",
         "liste",
         "lister",
+        "quels",
+        "quelles",
         "combien",
         "il y a",
         "site",
         "contact",
+        # Countries / common campus queries
+        "espagne",
+        "spain",
+        # Cities (common international)
+        "madrid",
+        "barcelone",
     )
     DEGREES_HINTS = (
         "diplome",

@@ -101,26 +101,8 @@ const WidgetChat = () => {
                     <div className="space-y-6 pb-2">
                         {messages.map(msg => <Message key={msg.id} message={msg} isWidget={true} />)}
                         {isLoading && (
-                            <div className="flex w-full justify-start">
-                                <div className="max-w-[90%] md:max-w-[85%] flex flex-col items-start">
-                                    <span className="font-heading mb-1 uppercase tracking-wider text-[10px] text-epitech-pink">
-                                        EPIQUOI_
-                                    </span>
-                                    <div className="relative leading-relaxed font-body shadow-sm px-4 py-2 text-sm bg-white text-slate-700 border-l-4 border-slate-200">
-                                        <div className="absolute top-0 left-0 w-2 h-2 bg-black/5" />
-                                        <div className="text-xs font-mono text-slate-500">
-                                            <div>
-                                                {loadingStatus || fallbackLoadingPhases[loadingPhaseIdx]}
-                                                {dots}
-                                            </div>
-                                            {Array.isArray(loadingTrail) && loadingTrail.length > 1 && (
-                                                <div className="mt-1 text-[10px] text-slate-400">
-                                                    {loadingTrail.slice(0, -1).join(' → ')}
-                                                </div>
-                                            )}
-                                        </div>
-                                    </div>
-                                </div>
+                            <div className="flex justify-start w-full animate-pulse pl-2">
+                                <span className="text-xs font-mono text-slate-400">Thinking...</span>
                             </div>
                         )}
                         <div ref={scrollRef} />

@@ -11,6 +11,7 @@ from app.core.settings import Settings, get_settings
 from app.services.epitech_contact import scrape_campuses
 from app.services.epitech_degrees import scrape_degrees
 from app.services.epitech_pedagogy import scrape_pedagogy
+from app.services.epitech_values import scrape_values
 
 
 logger = logging.getLogger(__name__)
@@ -116,6 +117,31 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/scrape/pedagogy")
     async def scrape_pedagogy_get() -> Dict[str, Any]:
         return await scrape_pedagogy_endpoint()
+
+    @app.post("/scrape/values")
+    async def scrape_values_endpoint() -> Dict[str, Any]:
+        t0 = time.time()
+        try:
+            values, duration_ms = await scrape_values(
+                timeout_sec=settings.scrape_timeout_sec,
+                user_agent=settings.user_agent,
+            )
+        except Exception as e:
+            logger.exception("Failed to scrape values")
+            raise HTTPException(status_code=502, detail=str(e))
+
+        return {
+            "data": values,
+            "meta": {
+                "source": "epitech.eu/ecole-informatique-apres-bac/engagements",
+                "duration_ms": duration_ms,
+                "server_ms": int((time.time() - t0) * 1000),
+            },
+        }
+
+    @app.get("/scrape/values")
+    async def scrape_values_get() -> Dict[str, Any]:
+        return await scrape_values_endpoint()
 
     return app
 

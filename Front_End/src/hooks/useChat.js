@@ -50,6 +50,15 @@ export const useChat = () => {
 
         // Normal Chat Flow
         const userMsg = { id: Date.now(), text: textToSend, sender: 'user' };
+
+        // Préparer l'historique pour le backend (format attendu: {sender, text, isError})
+        // On envoie l'état ACTUEL des messages (avant d'ajouter le nouveau message utilisateur)
+        const historyForBackend = messages.map(msg => ({
+            sender: msg.sender,
+            text: msg.text,
+            isError: msg.isError || false
+        }));
+
         setMessages(prev => [...prev, userMsg]);
         setInput('');
         setIsLoading(true);
@@ -57,16 +66,7 @@ export const useChat = () => {
         setLoadingTrail(['Réflexion']);
 
         try {
-            const response = await sendMessage(textToSend, messages, (evt) => {
-                if (evt?.label) {
-                    setLoadingStatus(evt.label);
-                    setLoadingTrail((prev) => {
-                        if (prev[prev.length - 1] === evt.label) return prev;
-                        const next = [...prev, evt.label];
-                        return next.slice(-4);
-                    });
-                }
-            });
+            const response = await sendMessage(textToSend, historyForBackend);
             const botMessage = { ...response, id: Date.now() + 1 };
             setMessages(prev => [...prev, botMessage]);
         } catch (error) {
