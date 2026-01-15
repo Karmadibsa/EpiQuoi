@@ -24,6 +24,7 @@ from app.services.geocoding_service import GeocodingService
 from app.utils.campus_data import CAMPUSES, CITY_ALIASES, format_campus_list
 from app.utils.language_detection import detect_language
 from app.utils.tool_router import ToolRouter
+from app.utils.tool_router import ToolDecision
 
 logger = logging.getLogger(__name__)
 
@@ -116,13 +117,134 @@ class ChatService:
             context_extra = ""
             backend_source = f"Ollama Local ({settings.ollama_model})"
             msg_lower = request.message.lower()
-            tool_decisions = ToolRouter.route(request.message)
+
+            # Conversation-aware context: user may omit "Epitech" in a follow-up.
+            def _has_epitech_context() -> bool:
+                if "epitech" in msg_lower:
+                    return True
+                # Look at a few recent turns for "epitech" (user or assistant)
+                for turn in reversed(request.history[-6:]):
+                    if "epitech" in (turn.text or "").lower():
+                        return True
+                return False
+
+            def _degrees_followup_context() -> bool:
+                """
+                Detect a follow-up like:
+                  user: "quelles formations ?"
+                  bot: "Tu parles des formations d'Epitech ? ... niveau + ville"
+                  user: "bac+3"
+                In that case, we SHOULD call the degrees tool even if the current message has no keywords.
+                """
+                # Current message is likely just a level/short confirmation
+                short = len(msg_lower.strip()) <= 20
+                looks_like_level = any(
+                    k in msg_lower
+                    for k in (
+                        "bac+",
+                        "bts",
+                        "dut",
+                        "licence",
+                        "master",
+                        "reconversion",
+                        "lycée",
+                        "lycee",
+                    )
+                )
+                if not (short and looks_like_level):
+                    return False
+
+                # Recent assistant prompt asking about Epitech formations/programmes
+                for turn in reversed(request.history[-4:]):
+                    if turn.sender == "bot":
+                        t = (turn.text or "").lower()
+                        if ("formations d’epitech" in t) or ("formations d'epitech" in t) or (
+                            "formations d’epitech" in t
+                        ) or ("formations epitech" in t) or ("programmes" in t) or ("diplômes" in t) or ("diplomes" in t):
+                            return True
+                return False
+
+            epitech_context = _has_epitech_context()
+            degrees_followup = _degrees_followup_context()
+
+            # Off-topic guard: if user talks about something unrelated, don't call tools and don't hallucinate.
+            epitech_related_hints = (
+                "epitech" in msg_lower
+                or "campus" in msg_lower
+                or "formation" in msg_lower
+                or "formations" in msg_lower
+                or "programme" in msg_lower
+                or "programmes" in msg_lower
+                or "dipl" in msg_lower
+                or "msc" in msg_lower
+                or "bachelor" in msg_lower
+                or "coding academy" in msg_lower
+                or "web@cad" in msg_lower
+                or "admission" in msg_lower
+                or "inscription" in msg_lower
+            )
+            if not epitech_context and not epitech_related_hints:
+                if user_lang != "fr":
+                    return {
+                        "response": "I’m EpiQuoi — I can help with questions about Epitech (campuses, programs, admissions). What would you like to know about Epitech?",
+                        "backend_source": "Off-topic",
+                    }
+                return {
+                    "response": "Je suis **EpiQuoi** : je réponds uniquement aux questions liées à **Epitech** (campus, formations, admissions). Tu veux savoir quoi sur Epitech ?",
+                    "backend_source": "Off-topic",
+                }
+
+            # If the question is too ambiguous, ask a clarification instead of hallucinating.
+            if (("formation" in msg_lower) or ("formations" in msg_lower) or ("programme" in msg_lower) or ("dipl" in msg_lower)) and not epitech_context:
+                if user_lang != "fr":
+                    return {
+                        "response": "Are you asking about Epitech’s programs? If yes, tell me your current level (high school / Bac+2 / Bac+3 / reconversion) and your city.",
+                        "backend_source": "Clarification",
+                    }
+                return {
+                    "response": "Tu parles des **formations d’Epitech** ? Si oui, dis-moi ton niveau (Lycée / Bac+2 / Bac+3 / reconversion) et ta ville, et je te liste les bons programmes.",
+                    "backend_source": "Clarification",
+                }
+
+            tool_decisions = ToolRouter.route(request.message, epitech_context=epitech_context)
+            if degrees_followup and not tool_decisions["degrees"].call:
+                tool_decisions["degrees"] = ToolDecision(
+                    call=True,
+                    score=tool_decisions["degrees"].score,
+                    reasons=tool_decisions["degrees"].reasons + ["forced follow-up (level answer after formations question)"],
+                )
+
+            # If it's clearly Epitech-related but router is unsure, do a light speculative scrape in parallel
+            # (campus + degrees) to avoid hallucinations.
+            if epitech_context and not any(d.call for d in tool_decisions.values()):
+                if any(k in msg_lower for k in ("campus", "ville", "adresse", "formation", "formations", "programme", "dipl")):
+                    tool_decisions["campus"] = ToolDecision(
+                        call=True,
+                        score=tool_decisions["campus"].score,
+                        reasons=tool_decisions["campus"].reasons + ["speculative scrape (ambiguous epitech question)"],
+                    )
+                    tool_decisions["degrees"] = ToolDecision(
+                        call=True,
+                        score=tool_decisions["degrees"].score,
+                        reasons=tool_decisions["degrees"].reasons + ["speculative scrape (ambiguous epitech question)"],
+                    )
             print(
                 "🧰 [ROUTER] Décisions tools: "
                 f"news(call={tool_decisions['news'].call}, score={tool_decisions['news'].score:.1f}) | "
                 f"campus(call={tool_decisions['campus'].call}, score={tool_decisions['campus'].score:.1f}) | "
                 f"degrees(call={tool_decisions['degrees'].call}, score={tool_decisions['degrees'].score:.1f})"
             )
+
+            # Run selected tools in parallel (faster when multiple tools are needed).
+            import asyncio
+
+            tool_tasks: Dict[str, asyncio.Task] = {}
+            if tool_decisions["news"].call:
+                tool_tasks["news"] = asyncio.create_task(self.news_service.get_epitech_news())
+            if tool_decisions["campus"].call:
+                tool_tasks["campus"] = asyncio.create_task(self.campus_service.get_campus_info())
+            if tool_decisions["degrees"].call:
+                tool_tasks["degrees"] = asyncio.create_task(self.degrees_service.get_degrees_info())
 
             # Tool 1: News Scraper
             print("🔍 [2/6] Vérification si scraper NEWS nécessaire...")
@@ -131,7 +253,7 @@ class ChatService:
                 if tool_decisions["news"].reasons:
                     print(f"   ↳ raisons: {', '.join(tool_decisions['news'].reasons[:6])}")
                 logger.info("Tool Activation: Scraper Epitech News")
-                news_info = await self.news_service.get_epitech_news()
+                news_info = await tool_tasks["news"]
                 print("   ✓ Scraping news terminé avec succès")
                 context_extra += (
                     f"\n\n[SYSTÈME: DONNÉES LIVE INJECTÉES]\n"
@@ -148,7 +270,7 @@ class ChatService:
                 if tool_decisions["campus"].reasons:
                     print(f"   ↳ raisons: {', '.join(tool_decisions['campus'].reasons[:6])}")
                 logger.info("Tool Activation: Scraper Campus")
-                campus_data = await self.campus_service.get_campus_info()
+                campus_data = await tool_tasks["campus"]
                 
                 if campus_data:
                     # MCP returns {"data": [...], "meta": {...}}
@@ -197,7 +319,7 @@ class ChatService:
                 if tool_decisions["degrees"].reasons:
                     print(f"   ↳ raisons: {', '.join(tool_decisions['degrees'].reasons[:6])}")
                 logger.info("Tool Activation: Scraper Degrees")
-                degrees_data = await self.degrees_service.get_degrees_info()
+                degrees_data = await tool_tasks["degrees"]
 
                 if degrees_data and isinstance(degrees_data, dict):
                     items = degrees_data.get("data", [])
@@ -222,6 +344,9 @@ class ChatService:
                         "\n\n[SYSTÈME: DONNÉES DIPLÔMES/PROGRAMMES LIVE]\n"
                         "Voici les types de diplômes/programmes détectés sur le site Epitech :\n"
                         f"{degrees_text}\n"
+                        "RÈGLES STRICTES :\n"
+                        "- N'INVENTE PAS de spécialités/secteurs (ex: santé, énergie, biotech...) si ce n'est pas dans la liste ci-dessus.\n"
+                        "- Si l'utilisateur demande le détail des spécialisations, dis que tu peux expliquer les grandes familles (PGE/MSc/Coding Academy) mais que tu n'as pas le catalogue complet.\n"
                         "Utilise ces données comme source prioritaire si l'utilisateur demande les diplômes, programmes ou cursus."
                     )
                     backend_source += " + Scraper Degrees"

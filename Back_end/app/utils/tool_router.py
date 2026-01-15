@@ -33,6 +33,8 @@ class ToolRouter:
     # Tool-specific keywords
     CAMPUS_HINTS = (
         "campus",
+        "cite",
+        "citer",
         "ville",
         "où",
         "ou",
@@ -73,14 +75,14 @@ class ToolRouter:
     THRESH_NEWS = 2.5
 
     @classmethod
-    def route(cls, user_text: str) -> Dict[str, ToolDecision]:
+    def route(cls, user_text: str, *, epitech_context: bool = False) -> Dict[str, ToolDecision]:
         msg = (user_text or "").strip()
         lower = msg.lower()
 
         def has_any(needles: Tuple[str, ...]) -> bool:
             return any(n in lower for n in needles)
 
-        epitech_mentioned = has_any(cls.EPITECH_HINTS)
+        epitech_mentioned = epitech_context or has_any(cls.EPITECH_HINTS)
         explicit_tool = has_any(cls.EXPLICIT_TOOL_HINTS)
 
         decisions: Dict[str, ToolDecision] = {}
@@ -99,8 +101,10 @@ class ToolRouter:
             campus_score += 0.5
             campus_reasons.append("+0.5 explicit tool hint")
 
+        # Campus is safe/cheap and frequently asked without "Epitech" in the message.
+        # So we allow campus scraping based on score alone (still requires campus-like wording).
         campus_call = (explicit_tool and campus_score >= 1.5) or (
-            epitech_mentioned and campus_score >= cls.THRESH_CAMPUS
+            campus_score >= cls.THRESH_CAMPUS and "campus" in lower
         )
         decisions["campus"] = ToolDecision(call=campus_call, score=campus_score, reasons=campus_reasons)
 
