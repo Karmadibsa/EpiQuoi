@@ -2,7 +2,7 @@
 
 import logging
 import re
-from typing import List, Dict, Optional, Tuple, Any
+from typing import List, Dict, Optional, Tuple, Any, Callable, Awaitable
 
 import ollama
 import os
@@ -26,7 +26,7 @@ from app.utils.campus_data import CAMPUSES, CITY_ALIASES, format_campus_list
 from app.utils.language_detection import detect_language
 from app.utils.tool_router import ToolRouter
 from app.utils.tool_router import ToolDecision
-from app.utils.epitech_faq import methodology_fr, methodology_en
+from app.utils.epitech_faq import methodology_fr, methodology_en, about_epitech_fr, about_epitech_en
 
 logger = logging.getLogger(__name__)
 
@@ -84,7 +84,11 @@ class ChatService:
         "lycee": ["lycée", "lyceen", "seconde", "première", "1ère", "2nde"]
     }
 
-    async def process_chat(self, request: ChatRequest) -> Dict[str, str]:
+    async def process_chat(
+        self,
+        request: ChatRequest,
+        progress_cb: Callable[[str, Dict[str, Any]], Awaitable[None]] | None = None,
+    ) -> Dict[str, str]:
         """
         Process a chat request and return AI response.
         
@@ -102,10 +106,22 @@ class ChatService:
         print(f"   Message: {request.message[:100]}{'...' if len(request.message) > 100 else ''}")
         print(f"   Historique: {len(request.history)} messages")
         print("=" * 60)
+
+        async def emit(phase: str, payload: Dict[str, Any] | None = None) -> None:
+            if not progress_cb:
+                return
+            try:
+                await progress_cb(phase, payload or {})
+            except Exception:
+                # Never fail the chat because of progress reporting
+                return
         
         try:
+            await emit("analyze", {"label": "Analyse de la demande"})
+
             # Detect language
             print("🔍 [1/6] Détection de la langue...")
+            await emit("detect_language", {"label": "Détection de la langue"})
             user_lang = detect_language(
                 request.message,
                 min_words=settings.min_words_for_lang_detection
@@ -123,11 +139,12 @@ class ChatService:
 
             # Conversation-aware context: user may omit "Epitech" in a follow-up.
             def _has_epitech_context() -> bool:
-                if "epitech" in msg_lower:
+                if "epitech" in msg_lower or "eptitech" in msg_lower:
                     return True
                 # Look at a few recent turns for "epitech" (user or assistant)
                 for turn in reversed(request.history[-6:]):
-                    if "epitech" in (turn.text or "").lower():
+                    t = (turn.text or "").lower()
+                    if ("epitech" in t) or ("eptitech" in t):
                         return True
                 return False
 
@@ -173,10 +190,19 @@ class ChatService:
             epitech_context = _has_epitech_context()
             degrees_followup = _degrees_followup_context()
 
+            # Simple "what is Epitech?" intent (including common typo eptitech)
+            if ("epitech" in msg_lower or "eptitech" in msg_lower) and any(
+                k in msg_lower for k in ("c'est quoi", "cest quoi", "c quoi", "c quoi?", "c quoi ", "c’est quoi", "c’est quoi ?")
+            ):
+                if user_lang != "fr":
+                    return {"response": about_epitech_en(), "backend_source": "FAQ (about epitech)"}
+                return {"response": about_epitech_fr(), "backend_source": "FAQ (c'est quoi epitech)"}
+
             # Off-topic guard must be based on the CURRENT message, even if the conversation previously mentioned Epitech.
             # Otherwise the model will answer anything (Minecraft, etc.) just because earlier turns were about Epitech.
             epitech_related_hints_current = (
                 ("epitech" in msg_lower)
+                or ("eptitech" in msg_lower)
                 or ("campus" in msg_lower)
                 or ("formation" in msg_lower)
                 or ("formations" in msg_lower)
@@ -196,6 +222,8 @@ class ChatService:
                 or ("inscription" in msg_lower)
                 or ("pédagogie" in msg_lower)
                 or ("pedagogie" in msg_lower)
+                or ("pédago" in msg_lower)
+                or ("pedago" in msg_lower)
                 or ("méthodologie" in msg_lower)
                 or ("methodologie" in msg_lower)
             )
@@ -225,34 +253,35 @@ class ChatService:
 
             # If it's a methodology/pedagogy question, prefer the official page via MCP tool.
             # If the tool fails, fallback to the trusted FAQ snippet.
-            if epitech_context and any(k in msg_lower for k in ("méthodologie", "methodologie", "pédagogie", "pedagogie", "pédago", "pedago")):
-                tool_decisions = ToolRouter.route(request.message, epitech_context=epitech_context)
-                if tool_decisions.get("pedagogy") and tool_decisions["pedagogy"].call:
-                    pedagogy_data = await self.pedagogy_service.get_pedagogy_info()
-                    if pedagogy_data and isinstance(pedagogy_data, dict):
-                        p = pedagogy_data.get("data", {}) if isinstance(pedagogy_data.get("data"), dict) else {}
-                        pillars = p.get("pillars") or []
-                        pillars_txt = ", ".join(pillars) if isinstance(pillars, list) and pillars else None
-                        url = p.get("url")
-                        if user_lang != "fr":
-                            return {
-                                "response": (
-                                    "Epitech’s pedagogy is mainly **project-based learning** (active learning).\n"
-                                    f"- **Core pillars**: {pillars_txt or 'practice, collaboration, teamwork, communication'}\n"
-                                    "- **Goal**: learn by building, reasoning, and solving problems.\n\n"
-                                    f"Official page: {url}" if url else ""
-                                ).strip(),
-                                "backend_source": "MCP Tool (pedagogy)",
-                            }
+            if any(k in msg_lower for k in ("méthodologie", "methodologie", "pédagogie", "pedagogie", "pédago", "pedago")):
+                await emit("pedagogy", {"label": "Recherche des infos (pédagogie)"})
+                pedagogy_data = await self.pedagogy_service.get_pedagogy_info()
+                if pedagogy_data and isinstance(pedagogy_data, dict):
+                    p = pedagogy_data.get("data", {}) if isinstance(pedagogy_data.get("data"), dict) else {}
+                    pillars = p.get("pillars") or []
+                    pillars_txt = ", ".join(pillars) if isinstance(pillars, list) and pillars else None
+                    url = p.get("url")
+                    if user_lang != "fr":
                         return {
                             "response": (
-                                "La pédagogie Epitech est surtout une **pédagogie par projets** (pédagogie active).\n"
-                                f"- **Piliers** : {pillars_txt or 'la pratique, la collaboration, l’esprit d’équipe, la communication'}\n"
-                                "- **Objectif** : apprendre en construisant, raisonner, acquérir une méthode de résolution de problèmes.\n\n"
-                                f"Source officielle : {url}" if url else ""
+                                "If I rephrase: you’re asking about Epitech’s pedagogy.\n\n"
+                                "Epitech’s approach is mainly **project-based learning** (active learning).\n"
+                                f"- **Core pillars**: {pillars_txt or 'practice, collaboration, teamwork, communication'}\n"
+                                "- **Goal**: learn by building, reasoning, and solving problems.\n\n"
+                                f"Sources:\n- {url}" if url else ""
                             ).strip(),
-                            "backend_source": "MCP Tool (pédagogie)",
+                            "backend_source": "MCP Tool (pedagogy)",
                         }
+                    return {
+                        "response": (
+                            "Si je reformule : tu demandes la pédagogie (\"pédago\") d’Epitech.\n\n"
+                            "Epitech repose surtout sur une **pédagogie par projets** (pédagogie active).\n"
+                            f"- **Piliers** : {pillars_txt or 'la pratique, la collaboration, l’esprit d’équipe, la communication'}\n"
+                            "- **Objectif** : apprendre en construisant, raisonner, acquérir une méthode de résolution de problèmes.\n\n"
+                            f"Sources :\n- {url}" if url else ""
+                        ).strip(),
+                        "backend_source": "MCP Tool (pédagogie)",
+                    }
 
                 # Fallback
                 if user_lang != "fr":
@@ -306,18 +335,29 @@ class ChatService:
                 f"pedagogy(call={tool_decisions.get('pedagogy').call if tool_decisions.get('pedagogy') else False}, "
                 f"score={tool_decisions.get('pedagogy').score if tool_decisions.get('pedagogy') else 0.0:.1f})"
             )
+            await emit(
+                "route_tools",
+                {
+                    "label": "Décision des tools",
+                    "tools": {k: v.call for k, v in tool_decisions.items()},
+                },
+            )
 
             # Run selected tools in parallel (faster when multiple tools are needed).
             import asyncio
 
             tool_tasks: Dict[str, asyncio.Task] = {}
             if tool_decisions["news"].call:
+                await emit("news", {"label": "Recherche des infos (news)"})
                 tool_tasks["news"] = asyncio.create_task(self.news_service.get_epitech_news())
             if tool_decisions["campus"].call:
+                await emit("campus", {"label": "Recherche des infos (campus)"})
                 tool_tasks["campus"] = asyncio.create_task(self.campus_service.get_campus_info())
             if tool_decisions["degrees"].call:
+                await emit("degrees", {"label": "Recherche des infos (formations)"})
                 tool_tasks["degrees"] = asyncio.create_task(self.degrees_service.get_degrees_info())
             if tool_decisions.get("pedagogy") and tool_decisions["pedagogy"].call:
+                await emit("pedagogy", {"label": "Recherche des infos (pédagogie)"})
                 tool_tasks["pedagogy"] = asyncio.create_task(self.pedagogy_service.get_pedagogy_info())
 
             # Tool 1: News Scraper
@@ -504,11 +544,13 @@ class ChatService:
 
             # Build system prompt
             print("🔍 [5/6] Construction du prompt système...")
+            await emit("prompt", {"label": "Préparation du prompt"})
             system_content = self._build_system_prompt(level_context)
             print("   ✓ Prompt système construit")
 
             # Build messages for Ollama
             print("🔍 [6/6] Préparation des messages pour Ollama...")
+            await emit("messages", {"label": "Préparation des messages"})
             messages = self._build_messages(
                 system_content,
                 request.message,
@@ -522,6 +564,7 @@ class ChatService:
             print(f"\n🤖 APPEL À OLLAMA...")
             print(f"   Modèle: {settings.ollama_model}")
             print(f"   Timeout: {settings.ollama_timeout}s")
+            await emit("ollama", {"label": "Génération de la réponse"})
             try:
                 import asyncio
                 import time
@@ -548,6 +591,7 @@ class ChatService:
                 elapsed_time = time.time() - start_time
                 response_length = len(response['message']['content'])
                 print(f"   ✓ Réponse reçue en {elapsed_time:.2f}s ({response_length} caractères)")
+                await emit("finalize", {"label": "Finalisation"})
             except asyncio.TimeoutError:
                 logger.error(f"Ollama request timeout after {settings.ollama_timeout}s")
                 raise OllamaError(

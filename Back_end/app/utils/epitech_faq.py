@@ -29,3 +29,24 @@ def methodology_en() -> str:
         "To tailor it: which track (PGE / MSc / Coding Academy) and what’s your current level?"
     )
 
+
+def about_epitech_fr() -> str:
+    return (
+        "Si je reformule : tu demandes **c’est quoi Epitech**.\n\n"
+        "Epitech, c’est une **école** d’informatique (pas une université) qui forme par une pédagogie **par projets**.\n"
+        "En général, tu peux y retrouver des parcours comme : **Programme Grande École**, **Bachelor**, **Master of Science (MSc)** et des **MBA** (selon les pages officielles).\n\n"
+        "Tu veux que je te parle plutôt :\n"
+        "- des **formations** (Bachelor vs MSc/MBA),\n"
+        "- des **campus** (ta ville/pays),\n"
+        "- ou de la **pédagogie** ?"
+    )
+
+
+def about_epitech_en() -> str:
+    return (
+        "If I rephrase: you’re asking **what Epitech is**.\n\n"
+        "Epitech is a **computer science school** (not a university) with a **project-based** learning approach.\n"
+        "Depending on the official pages, you’ll see tracks like **Programme Grande École**, **Bachelor**, **Master of Science (MSc)** and **MBA**.\n\n"
+        "Do you want info about programs (Bachelor vs MSc/MBA), campuses, or pedagogy?"
+    )
+

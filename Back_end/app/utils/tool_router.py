@@ -27,7 +27,8 @@ class ToolRouter:
     """
 
     # Common signals
-    EPITECH_HINTS = ("epitech", "epi tech", "epi-tech")
+    # Include common typos (users often type fast on mobile).
+    EPITECH_HINTS = ("epitech", "eptitech", "epi tech", "epi-tech")
     EXPLICIT_TOOL_HINTS = ("scrape", "scraper", "scraping", "crawl", "crawler")
 
     # Tool-specific keywords
