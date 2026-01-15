@@ -303,13 +303,54 @@ class ChatService:
                 or ("methodologie" in msg_lower)
             )
 
+
             # Allow tiny follow-ups that rely on previous context (level confirmations, yes/no, city).
             msg_stripped = msg_lower.strip()
+            
+            # Phrases de suivi naturelles qui indiquent une continuation
+            followup_phrases = {
+                "oui", "non", "ok", "daccord", "d'accord", "merci", "yes", "no",
+                "plus d'info", "plus d'infos", "plus d'information", "plus d'informations",
+                "je veux bien", "je veux savoir", "dis-moi", "dis moi", "explique",
+                "continue", "va-y", "vas-y", "et ensuite", "quoi d'autre",
+                "comment", "pourquoi", "c'est quoi", "c'est-à-dire", "ça m'intéresse",
+                "interessant", "intéressant", "super", "genial", "génial", "cool",
+                "je suis intéressé", "je suis interessé", "ça a l'air bien",
+                "en savoir plus", "j'aimerais savoir", "peux-tu m'expliquer",
+            }
+            
+            # Vérifie si une des phrases de suivi est présente dans le message
+            has_followup_phrase = any(phrase in msg_stripped for phrase in followup_phrases)
+            
+            # Vérifie si le dernier message du bot parlait d'Epitech (contexte valide pour un suivi)
+            def _last_bot_was_epitech() -> bool:
+                for turn in reversed(request.history[-4:]):
+                    if turn.sender == "bot" and not turn.isError:
+                        bot_text = (turn.text or "").lower()
+                        # Le bot a parlé de campus, formations, ou Epitech
+                        if any(kw in bot_text for kw in ["epitech", "campus", "formation", "msc", "bachelor", "pge", "programme"]):
+                            return True
+                        break  # On ne regarde que le dernier message bot
+                return False
+            
+            last_bot_epitech = _last_bot_was_epitech()
+            
+            # Patterns qui indiquent une référence au contexte précédent
+            context_reference_patterns = [
+                r"je t'ai (dit|dis)", r"je t'avais (dit|dis)", r"comme je (t'ai |te l'ai |l'ai )",
+                r"tu m'as (dit|demandé)", r"ma question", r"ma demande",
+                r"je viens de", r"j'habite", r"je suis de", r"et le campus", r"et du coup",
+                r"quel campus", r"lequel", r"où ça", r"c'est où",
+            ]
+            has_context_reference = any(re.search(p, msg_stripped) for p in context_reference_patterns)
+            
             is_short_followup = (
-                len(msg_stripped) <= 24
+                len(msg_stripped) <= 80  # Augmenté pour permettre des phrases de contexte
                 and (
                     degrees_followup
-                    or msg_stripped in {"oui", "non", "ok", "daccord", "d'accord", "merci", "yes", "no"}
+                    or has_followup_phrase
+                    or has_context_reference  # Référence explicite au contexte
+                    or (last_bot_epitech and len(msg_stripped) <= 50)  # Message court après réponse Epitech
                     or re.search(r"\bbac\s*\+\s*\d\b", msg_stripped) is not None
                     or any(city.lower() == msg_stripped for city in CAMPUSES.keys())
                 )
@@ -998,6 +1039,14 @@ class ChatService:
         return (
             "### RÔLE\n"
             "Tu es 'EpiQuoi', conseiller d'orientation Epitech. Ton but : Qualifier le profil de l'étudiant.\n\n"
+
+            "### ⚠️ CONVERSATION EN COURS (CRITIQUE) ⚠️\n"
+            "Tu es en MILIEU de conversation. L'historique des messages précédents t'est fourni.\n"
+            "RÈGLES ABSOLUES :\n"
+            "1. Ne dis PAS 'Bonjour' si tu as déjà parlé à cet utilisateur (vérifie l'historique).\n"
+            "2. RAPPELLE-TOI des informations données : ville/localisation, niveau d'études, préférences.\n"
+            "3. Si l'utilisateur te rappelle quelque chose ('je t'ai dit...'), excuse-toi et utilise cette info.\n"
+            "4. Quand on te demande 'quel campus', utilise la LOCALISATION mentionnée dans l'historique.\n\n"
 
             "### FAITS (ANTI-HALLUCINATION)\n"
             "- Epitech est une **école** (pas une université). Ne dis JAMAIS \"Université Epitech\".\n\n"
