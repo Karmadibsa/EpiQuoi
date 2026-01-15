@@ -2,7 +2,7 @@
 
 import logging
 import re
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict, Optional, Tuple, Any
 
 import ollama
 import os
@@ -66,7 +66,7 @@ class ChatService:
     LEVEL_KEYWORDS = {
         "bac": [
             "bac ", "bac+0", "baccalauréat", "terminale", "stmg", "sti2d",
-            "stl", "st2s", "es", "s ", "l ", "bac s", "bac es", "bac l",
+            "stl", "st2s", "bac s", "bac es", "bac l",
             "bac pro", "bac techno"
         ],
         "bac+2": ["bac+2", "bts", "dut", "deug", "l2", "licence 2"],
@@ -151,11 +151,19 @@ class ChatService:
                 campus_data = await self.campus_service.get_campus_info()
                 
                 if campus_data:
-                    # Vérifier si c'est une liste ou un dict avec erreur
-                    if isinstance(campus_data, list):
-                        print(f"   ✓ Scraping campus terminé : {len(campus_data)} campus détectés par le scraper")
+                    # MCP returns {"data": [...], "meta": {...}}
+                    if isinstance(campus_data, dict) and isinstance(campus_data.get("data"), list):
+                        print(
+                            "   ✓ Scraping campus terminé : "
+                            f"{len(campus_data.get('data', []))} campus détectés (via MCP.data)"
+                        )
+                    elif isinstance(campus_data, list):
+                        print(f"   ✓ Scraping campus terminé : {len(campus_data)} campus détectés (list brute)")
                     else:
-                        print(f"   ⚠️ Format de données inattendu : {type(campus_data)}")
+                        print(
+                            f"   ⚠️ Format de données inattendu : {type(campus_data)} "
+                            "(attendu: dict{data} ou list)"
+                        )
                     
                     # Optimize data to prevent context overflow (OOM)
                     optimized_data = self._optimize_campus_data(campus_data)
@@ -336,9 +344,12 @@ class ChatService:
             lines.append(f"{idx}. {ville} ({pays}) : {forms}")
         return "\n".join(lines)
 
-    def _optimize_campus_data(self, data: List[Dict]) -> List[Dict]:
+    def _optimize_campus_data(self, data: Any) -> List[Dict]:
         """Optimize and filter campus data to reduce token usage."""
         optimized = []
+        # MCP Server returns {"data": [...], "meta": {...}}
+        if isinstance(data, dict) and isinstance(data.get("data"), list):
+            data = data.get("data")
         if not isinstance(data, list):
             return []
 
