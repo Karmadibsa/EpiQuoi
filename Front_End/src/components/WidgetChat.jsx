@@ -10,7 +10,6 @@ const WidgetChat = () => {
         setInput,
         isLoading,
         loadingStatus,
-        loadingTrail,
         step,
         handleSend,
         scrollRef,
@@ -108,17 +107,10 @@ const WidgetChat = () => {
                                     </span>
                                     <div className="relative leading-relaxed font-body shadow-sm px-4 py-2 text-sm bg-white text-slate-700 border-l-4 border-slate-200">
                                         <div className="absolute top-0 left-0 w-2 h-2 bg-black/5" />
-                                        <div className="text-xs font-mono text-slate-500">
-                                            <div>
-                                                {loadingStatus || fallbackLoadingPhases[loadingPhaseIdx]}
-                                                {dots}
-                                            </div>
-                                            {Array.isArray(loadingTrail) && loadingTrail.length > 1 && (
-                                                <div className="mt-1 text-[10px] text-slate-400">
-                                                    {loadingTrail.slice(0, -1).join(' → ')}
-                                                </div>
-                                            )}
-                                        </div>
+                                        <span className="text-xs font-mono text-slate-500">
+                                            {loadingStatus || fallbackLoadingPhases[loadingPhaseIdx]}
+                                            {dots}
+                                        </span>
                                     </div>
                                 </div>
                             </div>

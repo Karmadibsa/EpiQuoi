@@ -8,7 +8,6 @@ export const useChat = () => {
     const [isLoading, setIsLoading] = useState(false);
     const [step, setStep] = useState('chat'); // chat, error_zip
     const [loadingStatus, setLoadingStatus] = useState(null);
-    const [loadingTrail, setLoadingTrail] = useState([]);
 
     const scrollRef = useRef(null);
 
@@ -54,18 +53,10 @@ export const useChat = () => {
         setInput('');
         setIsLoading(true);
         setLoadingStatus('Réflexion');
-        setLoadingTrail(['Réflexion']);
 
         try {
             const response = await sendMessage(textToSend, messages, (evt) => {
-                if (evt?.label) {
-                    setLoadingStatus(evt.label);
-                    setLoadingTrail((prev) => {
-                        if (prev[prev.length - 1] === evt.label) return prev;
-                        const next = [...prev, evt.label];
-                        return next.slice(-4);
-                    });
-                }
+                if (evt?.label) setLoadingStatus(evt.label);
             });
             const botMessage = { ...response, id: Date.now() + 1 };
             setMessages(prev => [...prev, botMessage]);
@@ -80,7 +71,6 @@ export const useChat = () => {
         } finally {
             setIsLoading(false);
             setLoadingStatus(null);
-            setLoadingTrail([]);
         }
     };
 
@@ -90,7 +80,6 @@ export const useChat = () => {
         setInput,
         isLoading,
         loadingStatus,
-        loadingTrail,
         step,
         handleSend,
         scrollRef,

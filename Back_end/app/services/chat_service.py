@@ -117,8 +117,6 @@ class ChatService:
                 return
         
         try:
-            await emit("analyze", {"label": "Analyse de la demande"})
-
             # Detect language
             print("🔍 [1/6] Détection de la langue...")
             await emit("detect_language", {"label": "Détection de la langue"})
@@ -544,13 +542,11 @@ class ChatService:
 
             # Build system prompt
             print("🔍 [5/6] Construction du prompt système...")
-            await emit("prompt", {"label": "Préparation du prompt"})
             system_content = self._build_system_prompt(level_context)
             print("   ✓ Prompt système construit")
 
             # Build messages for Ollama
             print("🔍 [6/6] Préparation des messages pour Ollama...")
-            await emit("messages", {"label": "Préparation des messages"})
             messages = self._build_messages(
                 system_content,
                 request.message,
@@ -591,7 +587,6 @@ class ChatService:
                 elapsed_time = time.time() - start_time
                 response_length = len(response['message']['content'])
                 print(f"   ✓ Réponse reçue en {elapsed_time:.2f}s ({response_length} caractères)")
-                await emit("finalize", {"label": "Finalisation"})
             except asyncio.TimeoutError:
                 logger.error(f"Ollama request timeout after {settings.ollama_timeout}s")
                 raise OllamaError(
