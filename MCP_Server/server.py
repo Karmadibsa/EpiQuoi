@@ -1,24 +1,10 @@
-import os
-import asyncio
-import json
 import uvicorn
-from fastapi import FastAPI, Request
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
 
-# --- 1. CONFIGURATION DU SERVEUR WEB ---
-app = FastAPI()
+from app.main import create_app
+from app.core.settings import get_settings
 
-# Le fameux "Tapis Rouge" pour React (CORS)
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # On autorise tout le monde pour tester (plus simple)
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+app = create_app()
 
-# --- 2. LES OUTILS (TOOLS) ---
 
 async def run_scrapy_spider():
     """Lance le scraper et récupère le JSON"""
@@ -120,5 +106,5 @@ async def chat_endpoint(request: Request):
 
 # --- 4. LANCEMENT ---
 if __name__ == "__main__":
-    print("🚀 Serveur lancé sur http://localhost:8001")
-    uvicorn.run(app, host="0.0.0.0", port=8001)
+    settings = get_settings()
+    uvicorn.run(app, host=settings.host, port=settings.port, log_level=settings.log_level.lower())

@@ -1,22 +1,18 @@
 #!/bin/bash
-# Script pour créer et configurer le venv du MCP Server
+set -euo pipefail
 
 echo "📦 Création du venv dans MCP_Server..."
 
-# Créer le venv
 python3 -m venv venv
 
-# Activer le venv
 echo "🔧 Activation du venv..."
 source venv/bin/activate
 
-# Mettre à jour pip
 echo "⬆️  Mise à jour de pip..."
-pip install --upgrade pip
+python3 -m pip install --upgrade pip
 
-# Installer les dépendances
 echo "📥 Installation des dépendances..."
-pip install -r requirements.txt
+python3 -m pip install -r requirements.txt
 
 echo "✅ Installation terminée !"
 echo ""
@@ -25,3 +21,7 @@ echo "  source venv/bin/activate"
 echo ""
 echo "Pour lancer le serveur MCP :"
 echo "  python3 server.py"
+echo ""
+echo "⚠️ IMPORTANT : vérifie que tu utilises le bon python (celui de ./venv) :"
+echo "  which python3"
+echo "  python3 -c \"import uvicorn; print('uvicorn OK')\""

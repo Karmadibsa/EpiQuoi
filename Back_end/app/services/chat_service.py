@@ -2,7 +2,7 @@
 
 import logging
 import re
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict, Optional, Tuple, Any
 
 import ollama
 import os
@@ -19,9 +19,14 @@ from app.exceptions import OllamaError
 from app.models.schemas import ChatRequest, MessageHistory
 from app.services.news_service import NewsService
 from app.services.campus_service import CampusService
+from app.services.degrees_service import DegreesService
+from app.services.pedagogy_service import PedagogyService
 from app.services.geocoding_service import GeocodingService
 from app.utils.campus_data import CAMPUSES, CITY_ALIASES, format_campus_list
 from app.utils.language_detection import detect_language
+from app.utils.tool_router import ToolRouter
+from app.utils.tool_router import ToolDecision
+from app.utils.epitech_faq import methodology_fr, methodology_en
 
 logger = logging.getLogger(__name__)
 
@@ -33,10 +38,19 @@ class ChatService:
         """Initialize chat service with dependencies."""
         self.news_service = NewsService()
         self.campus_service = CampusService()
+        self.degrees_service = DegreesService()
+        self.pedagogy_service = PedagogyService()
         self.geocoding_service = GeocodingService()
 
     # Keywords for intent detection
     NEWS_KEYWORDS = ["news", "actualité", "actu", "nouveauté", "événement"]
+
+    DEGREES_KEYWORDS = [
+        "diplome", "diplôme", "diplomes", "diplômes",
+        "programme", "programmes", "cursus", "formation", "formations",
+        "msc", "master", "master of science", "bachelor",
+        "coding academy", "web@cadémie", "web@academie",
+    ]
     
     NON_LOCATION_KEYWORDS = [
         "méthodologie", "methodologie", "pédagogie", "pedagogie", "programme",
@@ -56,7 +70,7 @@ class ChatService:
     LEVEL_KEYWORDS = {
         "bac": [
             "bac ", "bac+0", "baccalauréat", "terminale", "stmg", "sti2d",
-            "stl", "st2s", "es", "s ", "l ", "bac s", "bac es", "bac l",
+            "stl", "st2s", "bac s", "bac es", "bac l",
             "bac pro", "bac techno"
         ],
         "bac+2": ["bac+2", "bts", "dut", "deug", "l2", "licence 2"],
@@ -107,12 +121,213 @@ class ChatService:
             backend_source = f"Ollama Local ({settings.ollama_model})"
             msg_lower = request.message.lower()
 
+            # Conversation-aware context: user may omit "Epitech" in a follow-up.
+            def _has_epitech_context() -> bool:
+                if "epitech" in msg_lower:
+                    return True
+                # Look at a few recent turns for "epitech" (user or assistant)
+                for turn in reversed(request.history[-6:]):
+                    if "epitech" in (turn.text or "").lower():
+                        return True
+                return False
+
+            def _degrees_followup_context() -> bool:
+                """
+                Detect a follow-up like:
+                  user: "quelles formations ?"
+                  bot: "Tu parles des formations d'Epitech ? ... niveau + ville"
+                  user: "bac+3"
+                In that case, we SHOULD call the degrees tool even if the current message has no keywords.
+                """
+                # Current message is likely just a level/short confirmation
+                short = len(msg_lower.strip()) <= 20
+                looks_like_level = any(
+                    k in msg_lower
+                    for k in (
+                        "bac+",
+                        "bac +",
+                        "bts",
+                        "dut",
+                        "licence",
+                        "master",
+                        "reconversion",
+                        "lycée",
+                        "lycee",
+                    )
+                )
+                if not (short and looks_like_level):
+                    return False
+
+                # Recent assistant prompt asking about Epitech formations/programmes/specialisations
+                for turn in reversed(request.history[-4:]):
+                    if turn.sender == "bot":
+                        t = (turn.text or "").lower()
+                        if (
+                            ("formations" in t or "programme" in t or "dipl" in t or "spécialisation" in t or "specialisation" in t)
+                            and ("epitech" in t)
+                            and (("bachelor" in t) or ("msc" in t) or ("master of science" in t) or ("pré-msc" in t) or ("pre-msc" in t))
+                        ):
+                            return True
+                return False
+
+            epitech_context = _has_epitech_context()
+            degrees_followup = _degrees_followup_context()
+
+            # Off-topic guard must be based on the CURRENT message, even if the conversation previously mentioned Epitech.
+            # Otherwise the model will answer anything (Minecraft, etc.) just because earlier turns were about Epitech.
+            epitech_related_hints_current = (
+                ("epitech" in msg_lower)
+                or ("campus" in msg_lower)
+                or ("formation" in msg_lower)
+                or ("formations" in msg_lower)
+                or ("programme" in msg_lower)
+                or ("programmes" in msg_lower)
+                or ("dipl" in msg_lower)
+                or ("specialisation" in msg_lower)
+                or ("spécialisation" in msg_lower)
+                or ("specialisations" in msg_lower)
+                or ("spécialisations" in msg_lower)
+                or ("msc" in msg_lower)
+                or ("bachelor" in msg_lower)
+                or ("mba" in msg_lower)
+                or ("coding academy" in msg_lower)
+                or ("web@cad" in msg_lower)
+                or ("admission" in msg_lower)
+                or ("inscription" in msg_lower)
+                or ("pédagogie" in msg_lower)
+                or ("pedagogie" in msg_lower)
+                or ("méthodologie" in msg_lower)
+                or ("methodologie" in msg_lower)
+            )
+
+            # Allow tiny follow-ups that rely on previous context (level confirmations, yes/no, city).
+            msg_stripped = msg_lower.strip()
+            is_short_followup = (
+                len(msg_stripped) <= 24
+                and (
+                    degrees_followup
+                    or msg_stripped in {"oui", "non", "ok", "daccord", "d'accord", "merci", "yes", "no"}
+                    or re.search(r"\bbac\s*\+\s*\d\b", msg_stripped) is not None
+                    or any(city.lower() == msg_stripped for city in CAMPUSES.keys())
+                )
+            )
+
+            if not epitech_related_hints_current and not is_short_followup:
+                if user_lang != "fr":
+                    return {
+                        "response": "I’m EpiQuoi — I only handle Epitech questions (campuses, programs, admissions). What would you like to know about Epitech?",
+                        "backend_source": "Off-topic",
+                    }
+                return {
+                    "response": "Je suis **EpiQuoi** : je réponds uniquement aux questions liées à **Epitech** (campus, formations, admissions). Tu veux savoir quoi sur Epitech ?",
+                    "backend_source": "Off-topic",
+                }
+
+            # If it's a methodology/pedagogy question, prefer the official page via MCP tool.
+            # If the tool fails, fallback to the trusted FAQ snippet.
+            if epitech_context and any(k in msg_lower for k in ("méthodologie", "methodologie", "pédagogie", "pedagogie", "pédago", "pedago")):
+                tool_decisions = ToolRouter.route(request.message, epitech_context=epitech_context)
+                if tool_decisions.get("pedagogy") and tool_decisions["pedagogy"].call:
+                    pedagogy_data = await self.pedagogy_service.get_pedagogy_info()
+                    if pedagogy_data and isinstance(pedagogy_data, dict):
+                        p = pedagogy_data.get("data", {}) if isinstance(pedagogy_data.get("data"), dict) else {}
+                        pillars = p.get("pillars") or []
+                        pillars_txt = ", ".join(pillars) if isinstance(pillars, list) and pillars else None
+                        url = p.get("url")
+                        if user_lang != "fr":
+                            return {
+                                "response": (
+                                    "Epitech’s pedagogy is mainly **project-based learning** (active learning).\n"
+                                    f"- **Core pillars**: {pillars_txt or 'practice, collaboration, teamwork, communication'}\n"
+                                    "- **Goal**: learn by building, reasoning, and solving problems.\n\n"
+                                    f"Official page: {url}" if url else ""
+                                ).strip(),
+                                "backend_source": "MCP Tool (pedagogy)",
+                            }
+                        return {
+                            "response": (
+                                "La pédagogie Epitech est surtout une **pédagogie par projets** (pédagogie active).\n"
+                                f"- **Piliers** : {pillars_txt or 'la pratique, la collaboration, l’esprit d’équipe, la communication'}\n"
+                                "- **Objectif** : apprendre en construisant, raisonner, acquérir une méthode de résolution de problèmes.\n\n"
+                                f"Source officielle : {url}" if url else ""
+                            ).strip(),
+                            "backend_source": "MCP Tool (pédagogie)",
+                        }
+
+                # Fallback
+                if user_lang != "fr":
+                    return {"response": methodology_en(), "backend_source": "FAQ (methodology)"}
+                return {"response": methodology_fr(), "backend_source": "FAQ (méthodologie)"}
+
+            # (off-topic guard handled earlier using current message content)
+
+            # If user asks about programs/specializations without saying "Epitech",
+            # we still prefer scraping (to avoid hallucinations) and we ask 1 short clarification in the final answer.
+            needs_track_clarification = False
+            if (
+                ("formation" in msg_lower)
+                or ("formations" in msg_lower)
+                or ("programme" in msg_lower)
+                or ("dipl" in msg_lower)
+                or ("specialisation" in msg_lower)
+                or ("spécialisation" in msg_lower)
+                or ("specialisations" in msg_lower)
+                or ("spécialisations" in msg_lower)
+            ) and not epitech_context:
+                needs_track_clarification = True
+
+            tool_decisions = ToolRouter.route(request.message, epitech_context=epitech_context)
+            if degrees_followup and not tool_decisions["degrees"].call:
+                tool_decisions["degrees"] = ToolDecision(
+                    call=True,
+                    score=tool_decisions["degrees"].score,
+                    reasons=tool_decisions["degrees"].reasons + ["forced follow-up (level answer after formations question)"],
+                )
+
+            # If it's clearly Epitech-related but router is unsure, do a light speculative scrape in parallel
+            # (campus + degrees) to avoid hallucinations.
+            if epitech_context and not any(d.call for d in tool_decisions.values()):
+                if any(k in msg_lower for k in ("campus", "ville", "adresse", "formation", "formations", "programme", "dipl")):
+                    tool_decisions["campus"] = ToolDecision(
+                        call=True,
+                        score=tool_decisions["campus"].score,
+                        reasons=tool_decisions["campus"].reasons + ["speculative scrape (ambiguous epitech question)"],
+                    )
+                    tool_decisions["degrees"] = ToolDecision(
+                        call=True,
+                        score=tool_decisions["degrees"].score,
+                        reasons=tool_decisions["degrees"].reasons + ["speculative scrape (ambiguous epitech question)"],
+                    )
+            print(
+                "🧰 [ROUTER] Décisions tools: "
+                f"news(call={tool_decisions['news'].call}, score={tool_decisions['news'].score:.1f}) | "
+                f"campus(call={tool_decisions['campus'].call}, score={tool_decisions['campus'].score:.1f}) | "
+                f"degrees(call={tool_decisions['degrees'].call}, score={tool_decisions['degrees'].score:.1f}) | "
+                f"pedagogy(call={tool_decisions.get('pedagogy').call if tool_decisions.get('pedagogy') else False}, "
+                f"score={tool_decisions.get('pedagogy').score if tool_decisions.get('pedagogy') else 0.0:.1f})"
+            )
+
+            # Run selected tools in parallel (faster when multiple tools are needed).
+            import asyncio
+
+            tool_tasks: Dict[str, asyncio.Task] = {}
+            if tool_decisions["news"].call:
+                tool_tasks["news"] = asyncio.create_task(self.news_service.get_epitech_news())
+            if tool_decisions["campus"].call:
+                tool_tasks["campus"] = asyncio.create_task(self.campus_service.get_campus_info())
+            if tool_decisions["degrees"].call:
+                tool_tasks["degrees"] = asyncio.create_task(self.degrees_service.get_degrees_info())
+            if tool_decisions.get("pedagogy") and tool_decisions["pedagogy"].call:
+                tool_tasks["pedagogy"] = asyncio.create_task(self.pedagogy_service.get_pedagogy_info())
+
             # Tool 1: News Scraper
             print("🔍 [2/6] Vérification si scraper NEWS nécessaire...")
-            if self._should_fetch_news(msg_lower):
+            if tool_decisions["news"].call:
                 print("   ⚡ SCRAPER NEWS ACTIVÉ - Démarrage...")
+                if tool_decisions["news"].reasons:
+                    print(f"   ↳ raisons: {', '.join(tool_decisions['news'].reasons[:6])}")
                 logger.info("Tool Activation: Scraper Epitech News")
-                news_info = await self.news_service.get_epitech_news()
+                news_info = await tool_tasks["news"]
                 print("   ✓ Scraping news terminé avec succès")
                 context_extra += (
                     f"\n\n[SYSTÈME: DONNÉES LIVE INJECTÉES]\n"
@@ -124,10 +339,12 @@ class ChatService:
 
             # Tool 1.5: Campus Scraper (Live)
             print("🔍 [2.5/6] Vérification demande scraping campus...")
-            if self._should_fetch_campus_data(msg_lower):
+            if tool_decisions["campus"].call:
                 print("   ⚡ SCRAPER CAMPUS ACTIVÉ - Démarrage...")
+                if tool_decisions["campus"].reasons:
+                    print(f"   ↳ raisons: {', '.join(tool_decisions['campus'].reasons[:6])}")
                 logger.info("Tool Activation: Scraper Campus")
-                campus_data = await self.campus_service.get_campus_info()
+                campus_data = await tool_tasks["campus"]
                 
                 if campus_data:
                     # Extraire la liste depuis le dict si nécessaire
@@ -200,6 +417,102 @@ class ChatService:
                     print("   ⚠️ Échec du scraping campus")
             else:
                 print("   → Pas de scraping campus demandé")
+
+            # Tool 1.7: Degrees / Programmes Scraper (Live)
+            print("🔍 [2.7/6] Vérification demande scraping diplômes/programmes...")
+            if tool_decisions["degrees"].call:
+                print("   ⚡ SCRAPER DEGREES ACTIVÉ - Démarrage...")
+                if tool_decisions["degrees"].reasons:
+                    print(f"   ↳ raisons: {', '.join(tool_decisions['degrees'].reasons[:6])}")
+                logger.info("Tool Activation: Scraper Degrees")
+                degrees_data = await tool_tasks["degrees"]
+
+                if degrees_data and isinstance(degrees_data, dict):
+                    items = degrees_data.get("data", [])
+                    print(f"   ✓ Scraping degrees terminé : {len(items)} programmes")
+
+                    # Build a compact, source-first block (LLM must cite URLs).
+                    sources: list[str] = []
+                    blocks: list[str] = []
+                    for prog in items:
+                        if not isinstance(prog, dict):
+                            continue
+                        nom = prog.get("nom")
+                        niveau = prog.get("niveau")
+                        cat = prog.get("categorie")
+                        pages = prog.get("pages", []) if isinstance(prog.get("pages"), list) else []
+
+                        header_parts = [p for p in [nom, cat, niveau] if p]
+                        header = " - ".join(header_parts) if header_parts else "Programme"
+
+                        # Keep only a few page snippets in the prompt (avoid token explosion),
+                        # but keep ALL URLs in Sources.
+                        page_lines: list[str] = []
+                        for p in pages:
+                            if not isinstance(p, dict):
+                                continue
+                            url = p.get("url")
+                            if isinstance(url, str):
+                                sources.append(url)
+                            title = p.get("h1") or p.get("title")
+                            desc = p.get("description")
+                            snippet = p.get("snippet")
+                            duration_hints = p.get("duration_hints") if isinstance(p.get("duration_hints"), list) else []
+                            line = f"- {title}" if title else "- Page"
+                            if snippet and isinstance(snippet, str):
+                                line += f": {snippet[:220]}{'…' if len(snippet) > 220 else ''}"
+                            if duration_hints:
+                                # Show at most 2 duration hints to keep it compact.
+                                dh = ", ".join([str(x) for x in duration_hints[:2]])
+                                line += f" (Durée repérée: {dh})"
+                            if url:
+                                line += f" (Source: {url})"
+                            # Show max 2 lines per programme to keep prompt small
+                            page_lines.append(line)
+                            if len(page_lines) >= 2:
+                                break
+
+                        blocks.append(header + "\n" + "\n".join(page_lines))
+
+                    # Deduplicate sources while preserving order
+                    seen = set()
+                    uniq_sources: list[str] = []
+                    for u in sources:
+                        if u in seen:
+                            continue
+                        seen.add(u)
+                        uniq_sources.append(u)
+
+                    degrees_text = "\n\n".join(blocks) if blocks else "Aucune donnée exploitable."
+                    context_extra += (
+                        "\n\n[SYSTÈME: DONNÉES DIPLÔMES/PROGRAMMES LIVE]\n"
+                        "Voici les informations OFFICIELLES scrapées (avec sources) :\n"
+                        f"{degrees_text}\n\n"
+                        "SOURCES (à afficher dans la réponse) :\n"
+                        + "\n".join(f"- {u}" for u in uniq_sources[:25])
+                        + ("\n- ... (autres sources disponibles)" if len(uniq_sources) > 25 else "")
+                        + "\n\n"
+                        "RÈGLES STRICTES :\n"
+                        "- Commence ta réponse par **1 phrase de reformulation** (ex: \"Si je reformule, tu veux la liste des spécialisations Epitech...\").\n"
+                        "- N'INVENTE PAS de spécialités/secteurs (ex: santé, énergie, biotech...) si ce n'est pas dans la liste ci-dessus.\n"
+                        "- N'INVENTE PAS de durées (1 an / 2 ans / etc.) : ne donne une durée que si elle apparaît dans les lignes \"Durée repérée\" ci-dessus, et cite la page correspondante.\n"
+                        "- Si l'utilisateur demande le **MBA**, et que des pages MBA sont dans les SOURCES, tu DOIS confirmer que le MBA existe et répondre UNIQUEMENT avec ces pages (ne le nie jamais).\n"
+                        "- Si l'utilisateur demande le détail des spécialisations, dis que tu peux expliquer les grandes familles (PGE/MSc/Coding Academy) mais que tu n'as pas le catalogue complet.\n"
+                        "- Quand tu donnes un détail (programme/specialisation), ajoute la/les URL(s) correspondantes en 'Sources:' à la fin.\n"
+                        "Utilise ces données comme source prioritaire si l'utilisateur demande les diplômes, programmes ou cursus."
+                    )
+                    if needs_track_clarification:
+                        context_extra += (
+                            "\n\n[INSTRUCTION]\n"
+                            "L'utilisateur n'a pas précisé s'il parle du Bachelor ou des MSc/MBA. "
+                            "Après avoir donné une liste courte et fiable (avec sources), pose UNE question: "
+                            "\"Tu vises le Bachelor ou les MSc/MBA, et tu es à quel niveau (Bac+2/Bac+3/reconversion)?\""
+                        )
+                    backend_source += " + Scraper Degrees"
+                else:
+                    print("   ⚠️ Échec du scraping degrees")
+            else:
+                print("   → Pas de scraping diplômes/programmes demandé")
 
             # Tool 2: Campus Finder
             print("🔍 [3/6] Détection de localisation...")
@@ -315,9 +628,12 @@ class ChatService:
             lines.append(f"{idx}. {ville} ({pays}) : {forms}")
         return "\n".join(lines)
 
-    def _optimize_campus_data(self, data: List[Dict]) -> List[Dict]:
+    def _optimize_campus_data(self, data: Any) -> List[Dict]:
         """Optimize and filter campus data to reduce token usage."""
         optimized = []
+        # MCP Server returns {"data": [...], "meta": {...}}
+        if isinstance(data, dict) and isinstance(data.get("data"), list):
+            data = data.get("data")
         if not isinstance(data, list):
             return []
 
@@ -365,33 +681,7 @@ class ChatService:
                  
         return optimized
 
-    def _should_fetch_news(self, msg_lower: str) -> bool:
-        """Check if news should be fetched based on message content."""
-        return (
-            any(k in msg_lower for k in self.NEWS_KEYWORDS)
-            and "epitech" in msg_lower
-            and "epitech" in msg_lower
-        )
-
-    def _should_fetch_campus_data(self, msg_lower: str) -> bool:
-        """Check if campus scraping should be triggered."""
-        # 1. Explicit scraping request
-        if "scraper" in msg_lower or "scraping" in msg_lower:
-            return True
-
-        # 2. Keywords related to location/campuses
-        topic_keywords = ["campus", "école", "ecole", "ville", "implantation", "site", "formations"]
-        if not any(k in msg_lower for k in topic_keywords):
-            return False
-
-        # 3. Action keywords or context
-        # "cite", "liste", "quelles" allow matching "Cite moi...", "Liste les...", "Quelles sont..."
-        action_keywords = [
-            "epitech", "lister", "liste", "cite", "citer", "donne", "donner",
-            "voir", "montre", "montrer", "quels", "quelles", "quel", "quelle",
-            "ou", "où", "trouver", "sont", "est", "il y a"
-        ]
-        return any(k in msg_lower for k in action_keywords)
+    # NOTE: Tool routing is handled by app.utils.tool_router.ToolRouter.
 
     async def _process_location_detection(
         self, message: str, msg_lower: str
@@ -557,6 +847,15 @@ class ChatService:
                 if turn.sender == "user":
                     full_user_context += " " + turn.text.lower()
 
+        # Prefer explicit "bac+N" patterns before keyword scanning (avoids matching "bac " in "bac +2").
+        m = re.search(r"\bbac\s*\+\s*(\d)\b", full_user_context)
+        if m:
+            n = m.group(1)
+            if n in {"2", "3", "4", "5"}:
+                return f"bac+{n}"
+            if n == "0":
+                return "bac"
+
         for level, keywords in self.LEVEL_KEYWORDS.items():
             for kw in keywords:
                 if kw in full_user_context:
@@ -605,6 +904,9 @@ class ChatService:
         return (
             "### RÔLE\n"
             "Tu es 'EpiQuoi', conseiller d'orientation Epitech. Ton but : Qualifier le profil de l'étudiant.\n\n"
+
+            "### FAITS (ANTI-HALLUCINATION)\n"
+            "- Epitech est une **école** (pas une université). Ne dis JAMAIS \"Université Epitech\".\n\n"
 
             "### LANGUE (IMPORTANT)\n"
             "DETECTE LA LANGUE DE L'UTILISATEUR (Français, Anglais, Espagnol...) ET RÉPONDS DANS LA MÊME LANGUE.\n"
