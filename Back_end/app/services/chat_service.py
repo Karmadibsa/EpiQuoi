@@ -66,6 +66,21 @@ class ChatService:
         "être", "etre", "avoir", "fait", "faire", "dit", "dire",
         "intéressant", "interessant", "cool", "sympa", "super"
     }
+
+    # STOP-WORDS / SUJETS INTERDITS
+    # Si ces mots sont détectés sans contexte Epitech fort, on coupe court.
+    FORBIDDEN_KEYWORDS = [
+        "recette", "cuisine", "gâteau", "tarte", "pizza", "cuire", "manger",
+        "météo", "climat", "pluie", "soleil", "température",
+        "politique", "président", "ministre", "élection", "vote", "loi",
+        "sport", "football", "match", "joueur", "équipe",
+        "cinéma", "film", "acteur", "série", "netflix",
+        "musique", "chanson", "album", "artiste",
+        "histoire", "napoléon", "guerre", "roi", "reine", "date de",
+        "math", "physique", "chimie", "équation", "calcul", "racine carrée",
+        "médecine", "docteur", "maladie", "symptôme", "traitement",
+        "blague", "raconte", "poème", "poesie", "histoire drôle"
+    ]
     
     LEVEL_KEYWORDS = {
         "bac": [
@@ -121,12 +136,40 @@ class ChatService:
             backend_source = f"Ollama Local ({settings.ollama_model})"
             msg_lower = request.message.lower()
 
+            # -------------------------------------------------------------------------
+            # 0. GARDE-FOU IMMÉDIAT (FORBIDDEN TOPICS)
+            # -------------------------------------------------------------------------
+            # On vérifie si l'utilisateur parle de sujets interdits AVANT MÊME de lancer l'IA.
+            # Exception : si le mot "site" est présent (pour "site web"), on laisse passer "site" n'est pas interdit mais bon.
+            # On vérifie si un mot interdit est présent. Si "tech" ou "code" ou "web" est aussi présent, on peut être plus clément,
+            # mais dans le doute, on bloque les recettes etc.
+            is_forbidden = any(bad in msg_lower for bad in self.FORBIDDEN_KEYWORDS)
+            
+            # Sauf si c'est une "blague de dev" demandée explicitement dans un contexte tech
+            # (mais pour l'instant on bloque tout pour être sûr).
+            
+            if is_forbidden:
+                 print(f"   ⛔ SUJET INTERDIT DÉTECTÉ (Mot-clé trouvé dans le message)")
+                 if user_lang != "fr":
+                    return {
+                        "response": "I am EpiQuoi, an expert on Epitech orientation. I cannot answer questions about other topics (cooking, weather, politics, general knowledge...). Do you have a question about the school?",
+                        "backend_source": "Guardrail (Forbidden Topic)",
+                    }
+                 return {
+                    "response": "Je suis **EpiQuoi**, expert en orientation Epitech. Je ne peux pas répondre aux questions sur d'autres sujets (cuisine, météo, politique, culture générale...). As-tu une question sur l'école ?",
+                    "backend_source": "Guardrail (Sujet Interdit)",
+                }
+
+            # -------------------------------------------------------------------------
+
             # Conversation-aware context: user may omit "Epitech" in a follow-up.
             def _has_epitech_context() -> bool:
                 if "epitech" in msg_lower:
                     return True
                 # Look at a few recent turns for "epitech" (user or assistant)
-                for turn in reversed(request.history[-6:]):
+                # REDUCTION DE LA FENETRE DE CONTEXTE A 3 MESSAGES (vs 6 avant)
+                # pour éviter les "fuites" de contexte trop lointaines.
+                for turn in reversed(request.history[-3:]):
                     if "epitech" in (turn.text or "").lower():
                         return True
                 return False
@@ -178,6 +221,7 @@ class ChatService:
             epitech_related_hints_current = (
                 ("epitech" in msg_lower)
                 or ("campus" in msg_lower)
+                or ("école" in msg_lower) or ("ecole" in msg_lower)
                 or ("formation" in msg_lower)
                 or ("formations" in msg_lower)
                 or ("programme" in msg_lower)
@@ -198,6 +242,8 @@ class ChatService:
                 or ("pedagogie" in msg_lower)
                 or ("méthodologie" in msg_lower)
                 or ("methodologie" in msg_lower)
+                or ("code" in msg_lower) or ("codage" in msg_lower) or ("développeur" in msg_lower)
+                or ("informatique" in msg_lower)
             )
 
             # Allow tiny follow-ups that rely on previous context (level confirmations, yes/no, city).
@@ -206,13 +252,18 @@ class ChatService:
                 len(msg_stripped) <= 24
                 and (
                     degrees_followup
-                    or msg_stripped in {"oui", "non", "ok", "daccord", "d'accord", "merci", "yes", "no"}
+                    or msg_stripped in {"oui", "non", "ok", "daccord", "d'accord", "merci", "yes", "no", "salut", "bonjour", "hello", "hi"}
                     or re.search(r"\bbac\s*\+\s*\d\b", msg_stripped) is not None
                     or any(city.lower() == msg_stripped for city in CAMPUSES.keys())
                 )
             )
 
-            if not epitech_related_hints_current and not is_short_followup:
+            # Si on a un contexte Epitech (historique récent) MAIS que le message actuel ne contient
+            # AUCUN mot clé lié à l'école/informatique ET n'est pas un court follow-up :
+            # C'est probablement une digression (ex: "Et les pommes ?").
+            # On force le guardrail ici.
+            if not epitech_related_hints_current and not is_short_followup and not epitech_context:
+                print("   ⛔ HORS SUJET DÉTECTÉ (Pas de mots-clés Epitech ni contexte)")
                 if user_lang != "fr":
                     return {
                         "response": "I’m EpiQuoi — I only handle Epitech questions (campuses, programs, admissions). What would you like to know about Epitech?",
@@ -258,8 +309,6 @@ class ChatService:
                 if user_lang != "fr":
                     return {"response": methodology_en(), "backend_source": "FAQ (methodology)"}
                 return {"response": methodology_fr(), "backend_source": "FAQ (méthodologie)"}
-
-            # (off-topic guard handled earlier using current message content)
 
             # If user asks about programs/specializations without saying "Epitech",
             # we still prefer scraping (to avoid hallucinations) and we ask 1 short clarification in the final answer.
@@ -871,10 +920,24 @@ class ChatService:
 
         return (
             "### RÔLE\n"
-            "Tu es 'EpiQuoi', conseiller d'orientation Epitech. Ton but : Qualifier le profil de l'étudiant.\n\n"
+            "Tu es 'EpiQuoi', une intelligence artificielle spécialisée UNIQUE en orientation pour l'école Epitech.\n"
+            "Ton SEUL et UNIQUE but est de renseigner sur Epitech.\n\n"
+
+            "### ⛔ SECTION CRITIQUE : NON-COMPÉTENCE / SUJETS INTERDITS\n"
+            "TU N'AS AUCUNE CONNAISSANCE SUR :\n"
+            "- La cuisine, les recettes, la nourriture.\n"
+            "- La météo, le climat, l'astronomie.\n"
+            "- La politique, l'histoire, la géographie générale.\n"
+            "- Le sport, le cinéma, les célébrités.\n"
+            "- Les mathématiques, la physique, la médecine.\n"
+            "SI L'UTILISATEUR POSE UNE QUESTION SUR CES SUJETS :\n"
+            "1. REFUSE CATÉGORIQUEMENT DE RÉPONDRE.\n"
+            "2. EXEMPLE DE RÉPONSE : 'Je suis désolé, je suis un bot expert Epitech. Je ne peux pas t'aider pour ta recette de cuisine. As-tu des questions sur nos formations ?'\n"
+            "3. NE DONNE JAMAIS, AU GRAND JAMAIS, L'INFORMATION DEMANDÉE (même si tu la connais).\n\n"
 
             "### FAITS (ANTI-HALLUCINATION)\n"
-            "- Epitech est une **école** (pas une université). Ne dis JAMAIS \"Université Epitech\".\n\n"
+            "- Epitech est une **école** (pas une université). Ne dis JAMAIS 'Université Epitech'.\n"
+            "- UTILISE UNIQUEMENT LES INFORMATIONS FOURNIES DANS LE CONTEXTE CI-DESSOUS. SI L'INFO N'Y EST PAS, DIS QUE TU NE SAIS PAS.\n\n"
 
             "### LANGUE (IMPORTANT)\n"
             "DETECTE LA LANGUE DE L'UTILISATEUR (Français, Anglais, Espagnol...) ET RÉPONDS DANS LA MÊME LANGUE.\n"
@@ -898,8 +961,9 @@ class ChatService:
             "RECOMMANDATIONS PAR NIVEAU :\n"
             "   - Lycée/Bac (STMG, STI2D, Bac Pro...) → 'Programme Grande École' (5 ans post-bac).\n"
             "   - Bac+2/3 (BTS, DUT, Licence) → 'MSc Pro' (IA, Data, Cyber) ou 'Année Pré-MSc'.\n"
-            "   - Reconversion → 'Coding Academy'.\n\n"
-
+            "   - Reconversion → 'Coding Academy'.\n"
+            "   - SI LE NIVEAU EST INCONNU : DEMANDE-LE AVANT DE PROPOSER QUOI QUE CE SOIT.\n\n"
+            
             "### PHASE DE CONVERSION (IMPORTANT)\n"
             "SIGNAUX D'INTÉRÊT à détecter : 'intéressant', 'cool', 'sympa', 'ça a l'air', 'je veux', 'inscription', 'oui'...\n"
             "SI SIGNAL DÉTECTÉ :\n"
@@ -911,7 +975,7 @@ class ChatService:
 
             "### INTERDICTIONS STRICTES\n"
             "- NE PAS METTRE DE NOTES DU GENRE '(Note: ...)' ou '(Remember: ...)' dans ta réponse. Jamais.\n"
-            "- HORS-SUJET : Blague tech + STOP.\n"
+            "- HORS-SUJET : Blague tech + STOP (Sauf si le sujet est explicitement interdit, alors refus strict).\n"
             "- Cursus valides uniquement : 'Programme Grande École', 'MSc Pro', 'Coding Academy'.\n\n"
 
             "### TRAME\n"
