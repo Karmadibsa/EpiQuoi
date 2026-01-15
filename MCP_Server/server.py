@@ -1,7 +1,7 @@
 import uvicorn
 
-from mcp_server.app import create_app
-from mcp_server.config import get_settings
+from app.main import create_app
+from app.core.settings import get_settings
 
 app = create_app()
 

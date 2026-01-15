@@ -1,0 +1,2 @@
+"""MCP FastAPI application package."""
+
