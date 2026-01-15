@@ -62,6 +62,7 @@ class ToolRouter:
         "formation",
         "formations",
         "msc",
+        "mba",
         "master",
         "master of science",
         "bachelor",

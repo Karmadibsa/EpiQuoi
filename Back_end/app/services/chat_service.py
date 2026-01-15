@@ -173,6 +173,56 @@ class ChatService:
             epitech_context = _has_epitech_context()
             degrees_followup = _degrees_followup_context()
 
+            # Off-topic guard must be based on the CURRENT message, even if the conversation previously mentioned Epitech.
+            # Otherwise the model will answer anything (Minecraft, etc.) just because earlier turns were about Epitech.
+            epitech_related_hints_current = (
+                ("epitech" in msg_lower)
+                or ("campus" in msg_lower)
+                or ("formation" in msg_lower)
+                or ("formations" in msg_lower)
+                or ("programme" in msg_lower)
+                or ("programmes" in msg_lower)
+                or ("dipl" in msg_lower)
+                or ("specialisation" in msg_lower)
+                or ("spécialisation" in msg_lower)
+                or ("specialisations" in msg_lower)
+                or ("spécialisations" in msg_lower)
+                or ("msc" in msg_lower)
+                or ("bachelor" in msg_lower)
+                or ("mba" in msg_lower)
+                or ("coding academy" in msg_lower)
+                or ("web@cad" in msg_lower)
+                or ("admission" in msg_lower)
+                or ("inscription" in msg_lower)
+                or ("pédagogie" in msg_lower)
+                or ("pedagogie" in msg_lower)
+                or ("méthodologie" in msg_lower)
+                or ("methodologie" in msg_lower)
+            )
+
+            # Allow tiny follow-ups that rely on previous context (level confirmations, yes/no, city).
+            msg_stripped = msg_lower.strip()
+            is_short_followup = (
+                len(msg_stripped) <= 24
+                and (
+                    degrees_followup
+                    or msg_stripped in {"oui", "non", "ok", "daccord", "d'accord", "merci", "yes", "no"}
+                    or re.search(r"\bbac\s*\+\s*\d\b", msg_stripped) is not None
+                    or any(city.lower() == msg_stripped for city in CAMPUSES.keys())
+                )
+            )
+
+            if not epitech_related_hints_current and not is_short_followup:
+                if user_lang != "fr":
+                    return {
+                        "response": "I’m EpiQuoi — I only handle Epitech questions (campuses, programs, admissions). What would you like to know about Epitech?",
+                        "backend_source": "Off-topic",
+                    }
+                return {
+                    "response": "Je suis **EpiQuoi** : je réponds uniquement aux questions liées à **Epitech** (campus, formations, admissions). Tu veux savoir quoi sur Epitech ?",
+                    "backend_source": "Off-topic",
+                }
+
             # If it's a methodology/pedagogy question, prefer the official page via MCP tool.
             # If the tool fails, fallback to the trusted FAQ snippet.
             if epitech_context and any(k in msg_lower for k in ("méthodologie", "methodologie", "pédagogie", "pedagogie", "pédago", "pedago")):
@@ -209,36 +259,7 @@ class ChatService:
                     return {"response": methodology_en(), "backend_source": "FAQ (methodology)"}
                 return {"response": methodology_fr(), "backend_source": "FAQ (méthodologie)"}
 
-            # Off-topic guard: if user talks about something unrelated, don't call tools and don't hallucinate.
-            epitech_related_hints = (
-                "epitech" in msg_lower
-                or "campus" in msg_lower
-                or "formation" in msg_lower
-                or "formations" in msg_lower
-                or "programme" in msg_lower
-                or "programmes" in msg_lower
-                or "dipl" in msg_lower
-                or "specialisation" in msg_lower
-                or "spécialisation" in msg_lower
-                or "specialisations" in msg_lower
-                or "spécialisations" in msg_lower
-                or "msc" in msg_lower
-                or "bachelor" in msg_lower
-                or "coding academy" in msg_lower
-                or "web@cad" in msg_lower
-                or "admission" in msg_lower
-                or "inscription" in msg_lower
-            )
-            if not epitech_context and not epitech_related_hints:
-                if user_lang != "fr":
-                    return {
-                        "response": "I’m EpiQuoi — I can help with questions about Epitech (campuses, programs, admissions). What would you like to know about Epitech?",
-                        "backend_source": "Off-topic",
-                    }
-                return {
-                    "response": "Je suis **EpiQuoi** : je réponds uniquement aux questions liées à **Epitech** (campus, formations, admissions). Tu veux savoir quoi sur Epitech ?",
-                    "backend_source": "Off-topic",
-                }
+            # (off-topic guard handled earlier using current message content)
 
             # If user asks about programs/specializations without saying "Epitech",
             # we still prefer scraping (to avoid hallucinations) and we ask 1 short clarification in the final answer.
@@ -443,6 +464,7 @@ class ChatService:
                         "- Commence ta réponse par **1 phrase de reformulation** (ex: \"Si je reformule, tu veux la liste des spécialisations Epitech...\").\n"
                         "- N'INVENTE PAS de spécialités/secteurs (ex: santé, énergie, biotech...) si ce n'est pas dans la liste ci-dessus.\n"
                         "- N'INVENTE PAS de durées (1 an / 2 ans / etc.) : ne donne une durée que si elle apparaît dans les lignes \"Durée repérée\" ci-dessus, et cite la page correspondante.\n"
+                        "- Si l'utilisateur demande le **MBA**, et que des pages MBA sont dans les SOURCES, tu DOIS confirmer que le MBA existe et répondre UNIQUEMENT avec ces pages (ne le nie jamais).\n"
                         "- Si l'utilisateur demande le détail des spécialisations, dis que tu peux expliquer les grandes familles (PGE/MSc/Coding Academy) mais que tu n'as pas le catalogue complet.\n"
                         "- Quand tu donnes un détail (programme/specialisation), ajoute la/les URL(s) correspondantes en 'Sources:' à la fin.\n"
                         "Utilise ces données comme source prioritaire si l'utilisateur demande les diplômes, programmes ou cursus."
@@ -850,6 +872,9 @@ class ChatService:
         return (
             "### RÔLE\n"
             "Tu es 'EpiQuoi', conseiller d'orientation Epitech. Ton but : Qualifier le profil de l'étudiant.\n\n"
+
+            "### FAITS (ANTI-HALLUCINATION)\n"
+            "- Epitech est une **école** (pas une université). Ne dis JAMAIS \"Université Epitech\".\n\n"
 
             "### LANGUE (IMPORTANT)\n"
             "DETECTE LA LANGUE DE L'UTILISATEUR (Français, Anglais, Espagnol...) ET RÉPONDS DANS LA MÊME LANGUE.\n"
