@@ -1,237 +1,201 @@
 from __future__ import annotations
 
+import asyncio
 import re
 import time
-from typing import Dict, List, Tuple
-from urllib.parse import urljoin, urlparse
+from html import unescape
+from typing import Any, Dict, List, Tuple
 
 import httpx
 
 
-EPITECH_BASE_URL = "https://www.epitech.eu/"
+# Official program pages (provided list) – used as the source of truth.
+DEGREES_CATALOG: List[Dict[str, Any]] = [
+    {
+        "nom": "Programme Grande École",
+        "categorie": "Diplôme",
+        "niveau": "Bac+5",
+        "pages": [
+            "https://www.epitech.eu/programme-grande-ecole-informatique/",
+            "https://www.epitech.eu/programme-grande-ecole-informatique/etudier-a-letranger/",
+        ],
+    },
+    {
+        "nom": "Programme Bachelor",
+        "categorie": "Diplôme",
+        "niveau": "Bac+3",
+        "pages": [
+            "https://www.epitech.eu/formation-bachelor-ecole-informatique/",
+            "https://www.epitech.eu/formation-bachelor-ecole-informatique/intelligence-artificielle/",
+            "https://www.epitech.eu/formation-bachelor-ecole-informatique/cybersecurite/",
+            "https://www.epitech.eu/formation-bachelor-ecole-informatique/cloud-web3/",
+            "https://www.epitech.eu/formation-bachelor-ecole-informatique/tech-business-management/",
+            "https://www.epitech.eu/formation-bachelor-ecole-informatique/developpeur-full-stack/",
+        ],
+    },
+    {
+        "nom": "Programme Master of Science",
+        "categorie": "Spécialisation",
+        "niveau": "Post Bac+2/Bac+3",
+        "pages": [
+            "https://www.epitech.eu/formation-alternance/pre-msc-post-bac2/",
+            "https://www.epitech.eu/formation-alternance/master-of-science-post-bac3/",
+            "https://www.epitech.eu/formation-alternance/master-of-science-cybersecurite/",
+            "https://www.epitech.eu/formation-alternance/master-of-science-cloud/",
+            "https://www.epitech.eu/formation-alternance/master-of-science-big-data/",
+            "https://www.epitech.eu/formation-alternance/master-of-science-realite-virtuelle/",
+            "https://www.epitech.eu/formation-alternance/master-of-science-intelligence-artificielle/",
+            "https://www.epitech.eu/formation-alternance/master-of-science-robotique-iot/",
+        ],
+    },
+    {
+        "nom": "MBA",
+        "categorie": "MBA",
+        "niveau": "Post Bac+3",
+        "pages": [
+            "https://www.epitech.eu/formation-alternance/mba-strategic-project-management-entrepreneurship/",
+            "https://www.epitech.eu/formation-alternance/mba-fintech-strategies-financieres/",
+            "https://www.epitech.eu/formation-alternance/mba-marketing-influence/",
+            "https://www.epitech.eu/formation-alternance/mba-intelligence-artificielle-transformation-organisation/",
+            "https://www.epitech.eu/formation-alternance/mba-data-protection-securite/",
+            "https://www.epitech.eu/formation-alternance/mba-digitalisation-de-la-fonction-rh/",
+            "https://www.epitech.eu/formation-alternance/mba-sante-ia-iot/",
+            "https://www.epitech.eu/formation-alternance/mba-data-science-business-intelligence/",
+            "https://www.epitech.eu/formation-alternance/mba-luxe-retail-tech/",
+        ],
+    },
+]
 
-# Heuristic keywords to discover and parse program pages.
-_DISCOVERY_KEYWORDS = (
-    "formation",
-    "formations",
-    "programme",
-    "programmes",
-    "bachelor",
-    "msc",
-    "master-of-science",
-    "master of science",
-    "coding-academy",
-    "coding academy",
-    "web@cadémie",
-    "web@academie",
-    "webacademy",
-    "grande-ecole",
-    "grande école",
-)
+
+def _strip_tags(html: str) -> str:
+    html = re.sub(r"(?is)<(script|style)[^>]*>.*?</\1>", " ", html)
+    text = re.sub(r"(?s)<[^>]+>", " ", html)
+    text = unescape(text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
 
 
-def _is_internal_epitech_url(url: str) -> bool:
-    try:
-        p = urlparse(url)
-    except Exception:
-        return False
-    return p.scheme in ("http", "https") and p.netloc.endswith("epitech.eu")
+def _extract_meta(html: str, name: str) -> str | None:
+    # <meta name="description" content="...">
+    m = re.search(
+        rf'(?is)<meta[^>]+name=["\']{re.escape(name)}["\'][^>]+content=["\']([^"\']+)["\']',
+        html,
+    )
+    return unescape(m.group(1)).strip() if m else None
 
 
-def _extract_links(html: str, base_url: str) -> List[str]:
-    # Basic href extraction (keeps this service dependency-free).
-    links = []
-    for href in re.findall(r'href=["\']([^"\']+)["\']', html, flags=re.IGNORECASE):
-        href = href.strip()
-        if not href or href.startswith(("#", "mailto:", "tel:", "javascript:")):
-            continue
-        abs_url = urljoin(base_url, href)
-        if _is_internal_epitech_url(abs_url):
-            links.append(abs_url)
-    # Deduplicate while preserving order.
-    seen = set()
-    out = []
-    for u in links:
-        if u in seen:
-            continue
-        seen.add(u)
-        out.append(u)
-    return out
+def _extract_og(html: str, prop: str) -> str | None:
+    # <meta property="og:title" content="...">
+    m = re.search(
+        rf'(?is)<meta[^>]+property=["\']{re.escape(prop)}["\'][^>]+content=["\']([^"\']+)["\']',
+        html,
+    )
+    return unescape(m.group(1)).strip() if m else None
 
 
-def _normalize_space(s: str) -> str:
-    return re.sub(r"\s+", " ", s).strip()
+def _extract_title(html: str) -> str | None:
+    m = re.search(r"(?is)<title[^>]*>(.*?)</title>", html)
+    if not m:
+        return None
+    return unescape(re.sub(r"\s+", " ", m.group(1))).strip()
 
 
-def _detect_programs_from_text(text: str, best_url_by_program: Dict[str, str]) -> List[Dict]:
+def _extract_h1(html: str) -> str | None:
+    m = re.search(r"(?is)<h1[^>]*>(.*?)</h1>", html)
+    if not m:
+        return None
+    return unescape(_strip_tags(m.group(1)))
+
+
+def _short_snippet(text: str, max_len: int = 320) -> str | None:
+    if not text:
+        return None
+    t = re.sub(r"\s+", " ", text).strip()
+    if len(t) <= max_len:
+        return t
+    cut = t[:max_len]
+    # cut at sentence boundary if possible
+    m = re.search(r"[.!?]\s", cut)
+    if m:
+        return cut[: m.end()].strip()
+    return cut.strip() + "…"
+
+
+def _extract_duration_hints(text: str) -> List[str]:
     """
-    Extract a stable, compact list of degree/program types.
-    This is intentionally conservative: we prefer returning fewer correct items rather than noisy marketing items.
+    Extract short duration hints like "1 an", "2 ans", "6 mois" from page text.
+    We keep it conservative and return up to a few unique matches.
     """
-    t = text.lower()
-
-    def has(*needles: str) -> bool:
-        return any(n.lower() in t for n in needles)
-
-    programs: List[Dict] = []
-
-    if has("programme grande école", "programme grande ecole", "grande école", "grande ecole", "pge"):
-        programs.append(
-            {
-                "nom": "Programme Grande École",
-                "categorie": "Diplôme",
-                "niveau": "Bac+5",
-                "url": best_url_by_program.get("Programme Grande École"),
-            }
-        )
-
-    if has("bachelor"):
-        programs.append(
-            {
-                "nom": "Bachelor",
-                "categorie": "Diplôme",
-                "niveau": "Bac+3",
-                "url": best_url_by_program.get("Bachelor"),
-            }
-        )
-
-    if has("msc", "master of science", "master-of-science", "msc pro"):
-        programs.append(
-            {
-                "nom": "MSc Pro / Master of Science",
-                "categorie": "Spécialisation",
-                "niveau": "Bac+5",
-                "url": best_url_by_program.get("MSc Pro / Master of Science"),
-            }
-        )
-
-    if has("coding academy", "coding-academy"):
-        programs.append(
-            {
-                "nom": "Coding Academy",
-                "categorie": "Reconversion",
-                "niveau": None,
-                "url": best_url_by_program.get("Coding Academy"),
-            }
-        )
-
-    if has("web@cadémie", "web@academie", "webacademy"):
-        programs.append(
-            {
-                "nom": "Web@cadémie",
-                "categorie": "Alternance / Web",
-                "niveau": None,
-                "url": best_url_by_program.get("Web@cadémie"),
-            }
-        )
-
-    return programs
-
-
-async def scrape_degrees(
-    timeout_sec: int,
-    user_agent: str,
-    max_pages: int = 20,
-    seed_urls: List[str] | None = None,
-) -> Tuple[List[Dict], int]:
-    """
-    Returns (degrees_list, duration_ms)
-
-    Note: we keep this dependency-free. The strategy is:
-    - Fetch a few seed pages
-    - Discover internal links likely related to programs/formations
-    - Fetch up to max_pages candidates and infer which program types exist
-    """
-    seed_urls = seed_urls or [
-        EPITECH_BASE_URL,
-        urljoin(EPITECH_BASE_URL, "formations/"),
-        urljoin(EPITECH_BASE_URL, "programme/"),
-        urljoin(EPITECH_BASE_URL, "programmes/"),
-        urljoin(EPITECH_BASE_URL, "admission/"),
+    if not text:
+        return []
+    lower = text.lower()
+    patterns = [
+        r"\b\d+\s*(?:an|ans|année|années)\b",
+        r"\b\d+\s*(?:mois)\b",
     ]
+    found: List[str] = []
+    seen = set()
+    for pat in patterns:
+        for m in re.finditer(pat, lower):
+            s = m.group(0).strip()
+            if s in seen:
+                continue
+            seen.add(s)
+            found.append(s)
+            if len(found) >= 6:
+                return found
+    return found
 
+
+async def scrape_degrees(timeout_sec: int, user_agent: str) -> Tuple[List[Dict[str, Any]], int]:
+    """
+    Returns (programs, duration_ms)
+
+    Output schema:
+      [
+        {
+          nom, categorie, niveau,
+          pages: [{url, title, h1, description, snippet}]
+        }, ...
+      ]
+    """
     headers = {"User-Agent": user_agent}
     start = time.time()
 
     async with httpx.AsyncClient(timeout=timeout_sec, headers=headers, follow_redirects=True) as client:
-        pages_text: List[Tuple[str, str]] = []
-        discovered: List[str] = []
+        sem = asyncio.Semaphore(8)
 
-        # 1) Seed fetch
-        for u in seed_urls:
-            try:
-                r = await client.get(u)
-                if r.status_code >= 400:
-                    continue
-                html = r.text or ""
-                pages_text.append((u, html))
-                discovered.extend(_extract_links(html, u))
-            except Exception:
-                continue
+        async def fetch(url: str) -> Dict[str, Any]:
+            async with sem:
+                try:
+                    r = await client.get(url)
+                    r.raise_for_status()
+                    html = r.text or ""
+                    text = _strip_tags(html)
+                    return {
+                        "url": url,
+                        "title": _extract_og(html, "og:title") or _extract_title(html),
+                        "h1": _extract_h1(html),
+                        "description": _extract_meta(html, "description") or _extract_og(html, "og:description"),
+                        "snippet": _short_snippet(text, 360),
+                        "duration_hints": _extract_duration_hints(text),
+                    }
+                except Exception as e:
+                    return {"url": url, "error": str(e)}
 
-        # 2) Candidate pages (filtered by keywords)
-        candidates = []
-        for u in discovered:
-            lu = u.lower()
-            if any(k in lu for k in _DISCOVERY_KEYWORDS):
-                candidates.append(u)
-        # Deduplicate
-        seen = set()
-        candidates = [u for u in candidates if not (u in seen or seen.add(u))]
-
-        # 3) Fetch candidates (bounded)
-        for u in candidates[:max_pages]:
-            try:
-                r = await client.get(u)
-                if r.status_code >= 400:
-                    continue
-                pages_text.append((u, r.text or ""))
-            except Exception:
-                continue
+        out: List[Dict[str, Any]] = []
+        for program in DEGREES_CATALOG:
+            urls = program.get("pages", [])
+            page_items = await asyncio.gather(*[fetch(u) for u in urls])
+            out.append(
+                {
+                    "nom": program["nom"],
+                    "categorie": program["categorie"],
+                    "niveau": program["niveau"],
+                    "pages": page_items,
+                }
+            )
 
     duration_ms = int((time.time() - start) * 1000)
-
-    # Build best URLs per program based on URL hints
-    best_url_by_program: Dict[str, str] = {}
-    for url, html in pages_text:
-        lu = url.lower()
-        # Simple URL-based preference mapping
-        if "grande" in lu or "ecole" in lu or "pge" in lu:
-            best_url_by_program.setdefault("Programme Grande École", url)
-        if "bachelor" in lu:
-            best_url_by_program.setdefault("Bachelor", url)
-        if "msc" in lu or "master" in lu:
-            best_url_by_program.setdefault("MSc Pro / Master of Science", url)
-        if "coding" in lu and "academy" in lu:
-            best_url_by_program.setdefault("Coding Academy", url)
-        if "web" in lu and ("academ" in lu or "wac" in lu):
-            best_url_by_program.setdefault("Web@cadémie", url)
-
-        # Some pages may contain clear headings; allow content-based fallback too.
-        txt = _normalize_space(re.sub(r"<[^>]+>", " ", html))
-        lt = txt.lower()
-        if "programme grande" in lt or "grande école" in lt or "grande ecole" in lt:
-            best_url_by_program.setdefault("Programme Grande École", url)
-        if "bachelor" in lt:
-            best_url_by_program.setdefault("Bachelor", url)
-        if "master of science" in lt or "msc" in lt:
-            best_url_by_program.setdefault("MSc Pro / Master of Science", url)
-        if "coding academy" in lt:
-            best_url_by_program.setdefault("Coding Academy", url)
-        if "web@cadémie" in lt or "web@academie" in lt:
-            best_url_by_program.setdefault("Web@cadémie", url)
-
-    # Infer programs from concatenated text
-    combined_text = "\n".join(_normalize_space(re.sub(r"<[^>]+>", " ", html)) for _, html in pages_text)
-    degrees = _detect_programs_from_text(combined_text, best_url_by_program)
-
-    # If discovery fails (site changes, blocked, etc.), provide a safe minimal fallback list.
-    if not degrees:
-        degrees = [
-            {"nom": "Programme Grande École", "categorie": "Diplôme", "niveau": "Bac+5", "url": None},
-            {"nom": "MSc Pro / Master of Science", "categorie": "Spécialisation", "niveau": "Bac+5", "url": None},
-            {"nom": "Coding Academy", "categorie": "Reconversion", "niveau": None, "url": None},
-        ]
-
-    return degrees, duration_ms
+    return out, duration_ms
 

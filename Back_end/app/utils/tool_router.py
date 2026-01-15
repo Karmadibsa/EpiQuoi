@@ -52,6 +52,10 @@ class ToolRouter:
         "diplôme",
         "diplomes",
         "diplômes",
+        "specialisation",
+        "spécialisation",
+        "specialisations",
+        "spécialisations",
         "programme",
         "programmes",
         "cursus",
@@ -68,11 +72,13 @@ class ToolRouter:
         "grande école",
     )
     NEWS_HINTS = ("news", "actualité", "actu", "nouveauté", "événement")
+    PEDAGOGY_HINTS = ("méthodologie", "methodologie", "pédagogie", "pedagogie", "pédago", "pedago")
 
     # Thresholds (tuned for "chatty" users)
     THRESH_CAMPUS = 2.0
     THRESH_DEGREES = 2.0
     THRESH_NEWS = 2.5
+    THRESH_PEDAGOGY = 1.5
 
     @classmethod
     def route(cls, user_text: str, *, epitech_context: bool = False) -> Dict[str, ToolDecision]:
@@ -115,6 +121,13 @@ class ToolRouter:
             if k in lower:
                 degrees_score += 1.0
                 degrees_reasons.append(f"+1 '{k}'")
+
+        # Special case: "spécialisations ?" is a very common query in this app.
+        # Give it extra weight so it can trigger scraping even without "Epitech" in the message.
+        if any(s in lower for s in ("specialisation", "spécialisation", "specialisations", "spécialisations")):
+            degrees_score += 1.0
+            degrees_reasons.append("+1 specialization question boost")
+
         if epitech_mentioned:
             degrees_score += 1.0
             degrees_reasons.append("+1 epitech mention")
@@ -122,9 +135,25 @@ class ToolRouter:
             degrees_score += 0.5
             degrees_reasons.append("+0.5 explicit tool hint")
 
-        degrees_call = (explicit_tool and degrees_score >= 1.5) or (
-            epitech_mentioned and degrees_score >= cls.THRESH_DEGREES
+        # Allow degrees scraping without explicit "Epitech" if the question is clearly about programs/specializations.
+        degrees_topic = any(
+            t in lower
+            for t in (
+                "formation",
+                "formations",
+                "programme",
+                "programmes",
+                "dipl",
+                "specialisation",
+                "spécialisation",
+                "specialisations",
+                "spécialisations",
+                "msc",
+                "bachelor",
+                "mba",
+            )
         )
+        degrees_call = (explicit_tool and degrees_score >= 1.5) or (degrees_topic and degrees_score >= cls.THRESH_DEGREES)
         decisions["degrees"] = ToolDecision(call=degrees_call, score=degrees_score, reasons=degrees_reasons)
 
         # --- NEWS ---
@@ -145,6 +174,23 @@ class ToolRouter:
             epitech_mentioned and news_score >= cls.THRESH_NEWS
         )
         decisions["news"] = ToolDecision(call=news_call, score=news_score, reasons=news_reasons)
+
+        # --- PEDAGOGY ---
+        pedagogy_score = 0.0
+        pedagogy_reasons: List[str] = []
+        for k in cls.PEDAGOGY_HINTS:
+            if k in lower:
+                pedagogy_score += 1.0
+                pedagogy_reasons.append(f"+1 '{k}'")
+        if epitech_mentioned:
+            pedagogy_score += 1.0
+            pedagogy_reasons.append("+1 epitech mention")
+        if explicit_tool:
+            pedagogy_score += 0.5
+            pedagogy_reasons.append("+0.5 explicit tool hint")
+
+        pedagogy_call = epitech_mentioned and pedagogy_score >= cls.THRESH_PEDAGOGY
+        decisions["pedagogy"] = ToolDecision(call=pedagogy_call, score=pedagogy_score, reasons=pedagogy_reasons)
 
         return decisions
 

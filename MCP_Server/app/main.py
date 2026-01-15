@@ -10,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.core.settings import Settings, get_settings
 from app.services.epitech_contact import scrape_campuses
 from app.services.epitech_degrees import scrape_degrees
+from app.services.epitech_pedagogy import scrape_pedagogy
 
 
 logger = logging.getLogger(__name__)
@@ -71,8 +72,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             degrees, duration_ms = await scrape_degrees(
                 timeout_sec=settings.scrape_timeout_sec,
                 user_agent=settings.user_agent,
-                max_pages=settings.degrees_max_pages,
-                seed_urls=settings.degrees_seed_urls,
             )
         except Exception as e:
             logger.exception("Failed to scrape degrees")
@@ -81,7 +80,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return {
             "data": degrees,
             "meta": {
-                "source": "epitech.eu (discovery)",
+                "source": "epitech.eu (official catalogue urls)",
                 "item_count": len(degrees),
                 "duration_ms": duration_ms,
                 "server_ms": int((time.time() - t0) * 1000),
@@ -92,6 +91,31 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/scrape/degrees")
     async def scrape_degrees_get() -> Dict[str, Any]:
         return await scrape_degrees_endpoint()
+
+    @app.post("/scrape/pedagogy")
+    async def scrape_pedagogy_endpoint() -> Dict[str, Any]:
+        t0 = time.time()
+        try:
+            pedagogy, duration_ms = await scrape_pedagogy(
+                timeout_sec=settings.scrape_timeout_sec,
+                user_agent=settings.user_agent,
+            )
+        except Exception as e:
+            logger.exception("Failed to scrape pedagogy")
+            raise HTTPException(status_code=502, detail=str(e))
+
+        return {
+            "data": pedagogy,
+            "meta": {
+                "source": "epitech.eu/ecole-informatique-apres-bac/pedagogie",
+                "duration_ms": duration_ms,
+                "server_ms": int((time.time() - t0) * 1000),
+            },
+        }
+
+    @app.get("/scrape/pedagogy")
+    async def scrape_pedagogy_get() -> Dict[str, Any]:
+        return await scrape_pedagogy_endpoint()
 
     return app
 
