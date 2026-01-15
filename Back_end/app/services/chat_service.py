@@ -21,6 +21,7 @@ from app.services.news_service import NewsService
 from app.services.campus_service import CampusService
 from app.services.degrees_service import DegreesService
 from app.services.pedagogy_service import PedagogyService
+from app.services.values_service import ValuesService
 from app.services.geocoding_service import GeocodingService
 from app.utils.campus_data import CAMPUSES, CITY_ALIASES, format_campus_list
 from app.utils.language_detection import detect_language
@@ -40,6 +41,7 @@ class ChatService:
         self.campus_service = CampusService()
         self.degrees_service = DegreesService()
         self.pedagogy_service = PedagogyService()
+        self.values_service = ValuesService()
         self.geocoding_service = GeocodingService()
 
     # Keywords for intent detection
@@ -104,22 +106,87 @@ class ChatService:
         print("=" * 60)
         
         try:
-            # Detect language
-            print("🔍 [1/6] Détection de la langue...")
-            user_lang = detect_language(
+            # Detect language (debug only). We ALWAYS respond in French.
+            print("🔍 [1/6] Détection de la langue (info)...")
+            detected_lang = detect_language(
                 request.message,
                 min_words=settings.min_words_for_lang_detection
             )
-            if user_lang != "fr":
-                logger.info(f"Language detected: {user_lang}")
-                print(f"   ✓ Langue détectée: {user_lang}")
+            if detected_lang != "fr":
+                logger.info(f"Language detected (ignored): {detected_lang}")
+                print(f"   ✓ Langue détectée (ignorée): {detected_lang}")
             else:
-                print(f"   ✓ Langue par défaut: français")
+                print("   ✓ Langue détectée: français")
+            user_lang = "fr"
 
             # Build context from tools
             context_extra = ""
             backend_source = f"Ollama Local ({settings.ollama_model})"
             msg_lower = request.message.lower()
+
+            # Language preference command (should not be blocked by off-topic guard)
+            if any(k in msg_lower for k in ("parle moi", "parle-moi", "reponds", "réponds")) and any(
+                k in msg_lower for k in ("en francais", "en français", "francais", "français")
+            ):
+                return {
+                    "response": "Compris. Je te réponds en **français** à partir de maintenant. Pose-moi ta question sur Epitech.",
+                    "backend_source": "Preference (language=fr)",
+                }
+
+            # We intentionally do NOT support switching away from French.
+            if any(k in msg_lower for k in ("in english", "english", "en anglais", "anglais", "speak english", "reply in english", "answer in english")):
+                return {
+                    "response": "Je réponds uniquement en **français**. Pose-moi ta question sur Epitech.",
+                    "backend_source": "Preference (language=fr-only)",
+                }
+
+            # "Devise / valeurs" Epitech: always use official source (no hallucination).
+            if ("epitech" in msg_lower) and any(k in msg_lower for k in ("devise", "valeur", "valeurs")):
+                wants_source = any(k in msg_lower for k in ("source", "sources", "lien", "liens", "url", "officiel"))
+                values_payload = await self.values_service.get_values_info()
+                if values_payload and isinstance(values_payload, dict):
+                    data = values_payload.get("data", {}) if isinstance(values_payload.get("data"), dict) else {}
+                    sentence = data.get("values_sentence")
+                    url = data.get("url")
+                    if sentence:
+                        resp = sentence
+                        if wants_source and url:
+                            resp += f"\n\nSource : {url}"
+                        return {"response": resp, "backend_source": "MCP Tool (values)"}
+                # Fallback if tool fails
+                resp = "Chez Epitech, nous croyons en nos valeurs, que sont l'excellence, le courage et la solidarité."
+                return {"response": resp, "backend_source": "Fallback (values)"}
+
+            # If user mixes Epitech + unrelated requests (recipes, games...), answer ONLY the Epitech part.
+            off_topic_keywords = [
+                "recette", "omelette", "omelette", "omelet", "cuisine", "minecraft", "hache",
+                "bonheur", "soeur", "sœur",
+            ]
+            has_offtopic = any(k in msg_lower for k in off_topic_keywords)
+            has_epitech = ("epitech" in msg_lower) or any(
+                k in msg_lower for k in ["campus", "formation", "formations", "programme", "dipl", "msc", "bachelor", "mba", "pédagogie", "pedagogie", "méthodologie", "methodologie"]
+            )
+            if has_epitech and has_offtopic:
+                # If campus list is requested, return a safe deterministic answer from the campus tool.
+                if "campus" in msg_lower or "campuses" in msg_lower:
+                    campus_data = await self.campus_service.get_campus_info()
+                    optimized = self._optimize_campus_data(campus_data)
+                    campus_text = self._format_campus_to_text(optimized)
+                    return {
+                        "response": (
+                            f"Voici les campus Epitech ({len(optimized)}) :\n{campus_text}\n\n"
+                            "Je ne peux pas répondre à la recette/au sujet non lié à Epitech ici. Pose-moi une question Epitech (campus, formations, admissions, pédagogie)."
+                        ),
+                        "backend_source": "Scraper Campus (filtered)",
+                    }
+                # Otherwise: refuse the off-topic part but keep conversation on Epitech.
+                return {
+                    "response": (
+                        "Je réponds uniquement à Epitech (campus, formations, admissions, pédagogie). "
+                        "Repose ta question Epitech seule et je te réponds."
+                    ),
+                    "backend_source": "Off-topic (mixed)",
+                }
 
             # Conversation-aware context: user may omit "Epitech" in a follow-up.
             def _has_epitech_context() -> bool:
@@ -590,12 +657,14 @@ class ChatService:
         for idx, c in enumerate(data, 1):
             ville = c['ville'].upper()
             pays = c['pays']
-            forms = ", ".join(c['formations'][:3]) if c['formations'] else "Toutes formations"  # Limiter à 3 formations max
-            if len(c['formations']) > 3:
-                forms += f" (+{len(c['formations']) - 3} autres)"
-            url = c.get("url")
-            url_part = f" (Source: {url})" if url else ""
-            lines.append(f"{idx}. {ville} ({pays}) : {forms}{url_part}")
+            # If the campus tool doesn't provide per-campus program lists, don't show a misleading placeholder.
+            if c.get("formations"):
+                forms = ", ".join(c["formations"][:3])
+                if len(c["formations"]) > 3:
+                    forms += f" (+{len(c['formations']) - 3} autres)"
+                lines.append(f"{idx}. {ville} ({pays}) : {forms}")
+            else:
+                lines.append(f"{idx}. {ville} ({pays})")
         return "\n".join(lines)
 
     def _optimize_campus_data(self, data: Any) -> List[Dict]:
@@ -880,8 +949,7 @@ class ChatService:
             "- Epitech est une **école** (pas une université). Ne dis JAMAIS \"Université Epitech\".\n\n"
 
             "### LANGUE (IMPORTANT)\n"
-            "DETECTE LA LANGUE DE L'UTILISATEUR (Français, Anglais, Espagnol...) ET RÉPONDS DANS LA MÊME LANGUE.\n"
-            "C'est primordial pour l'expérience utilisateur.\n\n"
+            "Tu réponds UNIQUEMENT en **français**.\n\n"
 
             "### ⚠️ VÉRITÉ GÉOGRAPHIQUE - RÈGLE ABSOLUE (CRITIQUE) ⚠️\n"
             "Voici la base de données OFFICIELLE et EXCLUSIVE des campus Epitech. TU NE DOIS JAMAIS INVENTER UNE AUTRE ADRESSE.\n"
@@ -947,17 +1015,11 @@ class ChatService:
         if context_extra:
             final_user_content += f"\n\n(Information système : {context_extra})"
 
-        # Add language instruction
-        if user_lang != 'fr':
-            final_user_content += (
-                f"\n\n[CRITICAL: THE USER SPEAKS {user_lang.upper()}. "
-                f"YOU MUST ANSWER IN {user_lang.upper()}. DO NOT SPEAK FRENCH.]"
-            )
-        else:
-            final_user_content += (
-                "\n\n[INSTRUCTION SYSTÈME ULTIME : "
-                "RÉPONDS DANS LA MÊME LANGUE QUE LE MESSAGE DE L'UTILISATEUR]"
-            )
+        # Always answer in French
+        final_user_content += (
+            "\n\n[INSTRUCTION SYSTÈME ULTIME : "
+            "RÉPONDS UNIQUEMENT EN FRANÇAIS]"
+        )
 
         messages.append({'role': 'user', 'content': final_user_content})
 

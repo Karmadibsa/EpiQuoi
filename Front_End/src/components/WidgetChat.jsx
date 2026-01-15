@@ -67,7 +67,7 @@ const WidgetChat = () => {
                         {messages.map(msg => <Message key={msg.id} message={msg} isWidget={true} />)}
                         {isLoading && (
                             <div className="flex justify-start w-full animate-pulse pl-2">
-                                <span className="text-xs font-mono text-slate-400">writing...</span>
+                                <span className="text-xs font-mono text-slate-400">Thinking...</span>
                             </div>
                         )}
                         <div ref={scrollRef} />
