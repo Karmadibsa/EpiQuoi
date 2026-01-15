@@ -22,6 +22,16 @@ class Settings(BaseSettings):
         default="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     )
 
+    # Degrees scraping (program discovery)
+    degrees_max_pages: int = Field(default=20, ge=1, le=100)
+    degrees_seed_urls: List[str] = Field(
+        default=[
+            "https://www.epitech.eu/",
+            "https://www.epitech.eu/formations/",
+            "https://www.epitech.eu/programmes/",
+        ]
+    )
+
     class Config:
         env_prefix = "MCP_"
         case_sensitive = False

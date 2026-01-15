@@ -19,9 +19,11 @@ from app.exceptions import OllamaError
 from app.models.schemas import ChatRequest, MessageHistory
 from app.services.news_service import NewsService
 from app.services.campus_service import CampusService
+from app.services.degrees_service import DegreesService
 from app.services.geocoding_service import GeocodingService
 from app.utils.campus_data import CAMPUSES, CITY_ALIASES, format_campus_list
 from app.utils.language_detection import detect_language
+from app.utils.tool_router import ToolRouter
 
 logger = logging.getLogger(__name__)
 
@@ -33,10 +35,18 @@ class ChatService:
         """Initialize chat service with dependencies."""
         self.news_service = NewsService()
         self.campus_service = CampusService()
+        self.degrees_service = DegreesService()
         self.geocoding_service = GeocodingService()
 
     # Keywords for intent detection
     NEWS_KEYWORDS = ["news", "actualité", "actu", "nouveauté", "événement"]
+
+    DEGREES_KEYWORDS = [
+        "diplome", "diplôme", "diplomes", "diplômes",
+        "programme", "programmes", "cursus", "formation", "formations",
+        "msc", "master", "master of science", "bachelor",
+        "coding academy", "web@cadémie", "web@academie",
+    ]
     
     NON_LOCATION_KEYWORDS = [
         "méthodologie", "methodologie", "pédagogie", "pedagogie", "programme",
@@ -106,11 +116,20 @@ class ChatService:
             context_extra = ""
             backend_source = f"Ollama Local ({settings.ollama_model})"
             msg_lower = request.message.lower()
+            tool_decisions = ToolRouter.route(request.message)
+            print(
+                "🧰 [ROUTER] Décisions tools: "
+                f"news(call={tool_decisions['news'].call}, score={tool_decisions['news'].score:.1f}) | "
+                f"campus(call={tool_decisions['campus'].call}, score={tool_decisions['campus'].score:.1f}) | "
+                f"degrees(call={tool_decisions['degrees'].call}, score={tool_decisions['degrees'].score:.1f})"
+            )
 
             # Tool 1: News Scraper
             print("🔍 [2/6] Vérification si scraper NEWS nécessaire...")
-            if self._should_fetch_news(msg_lower):
+            if tool_decisions["news"].call:
                 print("   ⚡ SCRAPER NEWS ACTIVÉ - Démarrage...")
+                if tool_decisions["news"].reasons:
+                    print(f"   ↳ raisons: {', '.join(tool_decisions['news'].reasons[:6])}")
                 logger.info("Tool Activation: Scraper Epitech News")
                 news_info = await self.news_service.get_epitech_news()
                 print("   ✓ Scraping news terminé avec succès")
@@ -124,8 +143,10 @@ class ChatService:
 
             # Tool 1.5: Campus Scraper (Live)
             print("🔍 [2.5/6] Vérification demande scraping campus...")
-            if self._should_fetch_campus_data(msg_lower):
+            if tool_decisions["campus"].call:
                 print("   ⚡ SCRAPER CAMPUS ACTIVÉ - Démarrage...")
+                if tool_decisions["campus"].reasons:
+                    print(f"   ↳ raisons: {', '.join(tool_decisions['campus'].reasons[:6])}")
                 logger.info("Tool Activation: Scraper Campus")
                 campus_data = await self.campus_service.get_campus_info()
                 
@@ -160,6 +181,46 @@ class ChatService:
                     print("   ⚠️ Échec du scraping campus")
             else:
                 print("   → Pas de scraping campus demandé")
+
+            # Tool 1.7: Degrees / Programmes Scraper (Live)
+            print("🔍 [2.7/6] Vérification demande scraping diplômes/programmes...")
+            if tool_decisions["degrees"].call:
+                print("   ⚡ SCRAPER DEGREES ACTIVÉ - Démarrage...")
+                if tool_decisions["degrees"].reasons:
+                    print(f"   ↳ raisons: {', '.join(tool_decisions['degrees'].reasons[:6])}")
+                logger.info("Tool Activation: Scraper Degrees")
+                degrees_data = await self.degrees_service.get_degrees_info()
+
+                if degrees_data and isinstance(degrees_data, dict):
+                    items = degrees_data.get("data", [])
+                    print(f"   ✓ Scraping degrees terminé : {len(items)} éléments")
+                    # Inject a compact summary
+                    lines = []
+                    for d in items[:10]:
+                        if not isinstance(d, dict):
+                            continue
+                        nom = d.get("nom")
+                        niveau = d.get("niveau")
+                        cat = d.get("categorie")
+                        url = d.get("url")
+                        parts = [p for p in [nom, cat, niveau] if p]
+                        line = " - ".join(parts)
+                        if url:
+                            line += f" ({url})"
+                        lines.append(line)
+
+                    degrees_text = "\n".join(lines) if lines else "Aucune donnée exploitable."
+                    context_extra += (
+                        "\n\n[SYSTÈME: DONNÉES DIPLÔMES/PROGRAMMES LIVE]\n"
+                        "Voici les types de diplômes/programmes détectés sur le site Epitech :\n"
+                        f"{degrees_text}\n"
+                        "Utilise ces données comme source prioritaire si l'utilisateur demande les diplômes, programmes ou cursus."
+                    )
+                    backend_source += " + Scraper Degrees"
+                else:
+                    print("   ⚠️ Échec du scraping degrees")
+            else:
+                print("   → Pas de scraping diplômes/programmes demandé")
 
             # Tool 2: Campus Finder
             print("🔍 [3/6] Détection de localisation...")
@@ -325,33 +386,7 @@ class ChatService:
                  
         return optimized
 
-    def _should_fetch_news(self, msg_lower: str) -> bool:
-        """Check if news should be fetched based on message content."""
-        return (
-            any(k in msg_lower for k in self.NEWS_KEYWORDS)
-            and "epitech" in msg_lower
-            and "epitech" in msg_lower
-        )
-
-    def _should_fetch_campus_data(self, msg_lower: str) -> bool:
-        """Check if campus scraping should be triggered."""
-        # 1. Explicit scraping request
-        if "scraper" in msg_lower or "scraping" in msg_lower:
-            return True
-
-        # 2. Keywords related to location/campuses
-        topic_keywords = ["campus", "école", "ecole", "ville", "implantation", "site", "formations"]
-        if not any(k in msg_lower for k in topic_keywords):
-            return False
-
-        # 3. Action keywords or context
-        # "cite", "liste", "quelles" allow matching "Cite moi...", "Liste les...", "Quelles sont..."
-        action_keywords = [
-            "epitech", "lister", "liste", "cite", "citer", "donne", "donner",
-            "voir", "montre", "montrer", "quels", "quelles", "quel", "quelle",
-            "ou", "où", "trouver", "sont", "est", "il y a"
-        ]
-        return any(k in msg_lower for k in action_keywords)
+    # NOTE: Tool routing is handled by app.utils.tool_router.ToolRouter.
 
     async def _process_location_detection(
         self, message: str, msg_lower: str

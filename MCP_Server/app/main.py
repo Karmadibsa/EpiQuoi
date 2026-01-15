@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.settings import Settings, get_settings
 from app.services.epitech_contact import scrape_campuses
+from app.services.epitech_degrees import scrape_degrees
 
 
 logger = logging.getLogger(__name__)
@@ -33,7 +34,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
 
     @app.get("/healthz")
-    async def healthz() -> Dict[str, Any]:
+    async def healthz() -> Dict[str, str]:
         return {"status": "ok"}
 
     @app.post("/scrape/campus")
@@ -57,6 +58,40 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "server_ms": int((time.time() - t0) * 1000),
             },
         }
+
+    # GET alias (idempotent + nice to test in a browser/curl)
+    @app.get("/scrape/campus")
+    async def scrape_campus_get() -> Dict[str, Any]:
+        return await scrape_campus()
+
+    @app.post("/scrape/degrees")
+    async def scrape_degrees_endpoint() -> Dict[str, Any]:
+        t0 = time.time()
+        try:
+            degrees, duration_ms = await scrape_degrees(
+                timeout_sec=settings.scrape_timeout_sec,
+                user_agent=settings.user_agent,
+                max_pages=settings.degrees_max_pages,
+                seed_urls=settings.degrees_seed_urls,
+            )
+        except Exception as e:
+            logger.exception("Failed to scrape degrees")
+            raise HTTPException(status_code=502, detail=str(e))
+
+        return {
+            "data": degrees,
+            "meta": {
+                "source": "epitech.eu (discovery)",
+                "item_count": len(degrees),
+                "duration_ms": duration_ms,
+                "server_ms": int((time.time() - t0) * 1000),
+            },
+        }
+
+    # GET alias
+    @app.get("/scrape/degrees")
+    async def scrape_degrees_get() -> Dict[str, Any]:
+        return await scrape_degrees_endpoint()
 
     return app
 
