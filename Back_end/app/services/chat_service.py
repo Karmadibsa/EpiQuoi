@@ -167,9 +167,8 @@ class ChatService:
                 if "epitech" in msg_lower:
                     return True
                 # Look at a few recent turns for "epitech" (user or assistant)
-                # REDUCTION DE LA FENETRE DE CONTEXTE A 3 MESSAGES (vs 6 avant)
-                # pour éviter les "fuites" de contexte trop lointaines.
-                for turn in reversed(request.history[-3:]):
+                # Augmented context: check last 8 turns (vs 3 previously) to maintain context longer
+                for turn in reversed(request.history[-8:]):
                     if "epitech" in (turn.text or "").lower():
                         return True
                 return False
