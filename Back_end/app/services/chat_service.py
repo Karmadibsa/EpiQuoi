@@ -124,6 +124,35 @@ class ChatService:
             backend_source = f"Ollama Local ({settings.ollama_model})"
             msg_lower = request.message.lower()
 
+            def _extract_country_filter(msg_lower_val: str) -> str | None:
+                """
+                Return a canonical country name matching our campus data (French labels),
+                based on a user query like "en Espagne".
+                """
+                s = msg_lower_val
+                if "espagne" in s or "spain" in s:
+                    return "Espagne"
+                if "allemagne" in s or "germany" in s:
+                    return "Allemagne"
+                if "belgique" in s or "belgium" in s:
+                    return "Belgique"
+                if "bénin" in s or "benin" in s:
+                    return "Bénin"
+                if "france" in s:
+                    return "France"
+                return None
+
+            def _extract_region_filter(msg_lower_val: str) -> List[str] | None:
+                """
+                Map French regions to campus cities we know.
+                Currently used to answer queries like "région Grand Est" without listing all campuses.
+                """
+                s = msg_lower_val.replace("-", " ").lower()
+                if ("grand est" in s) or ("grandest" in s):
+                    # Grand Est: Strasbourg, Nancy, Mulhouse
+                    return ["Strasbourg", "Nancy", "Mulhouse"]
+                return None
+
             # Language preference command (should not be blocked by off-topic guard)
             if any(k in msg_lower for k in ("parle moi", "parle-moi", "reponds", "réponds")) and any(
                 k in msg_lower for k in ("en francais", "en français", "francais", "français")
@@ -171,6 +200,13 @@ class ChatService:
                 if "campus" in msg_lower or "campuses" in msg_lower:
                     campus_data = await self.campus_service.get_campus_info()
                     optimized = self._optimize_campus_data(campus_data)
+                    country_filter = _extract_country_filter(msg_lower)
+                    if country_filter:
+                        optimized = [c for c in optimized if (c.get("pays") or "").lower() == country_filter.lower()]
+                    region_filter = _extract_region_filter(msg_lower)
+                    if region_filter:
+                        allowed = {c.lower() for c in region_filter}
+                        optimized = [c for c in optimized if (c.get("ville") or "").lower() in allowed]
                     campus_text = self._format_campus_to_text(optimized)
                     return {
                         "response": (
@@ -430,6 +466,24 @@ class ChatService:
                     
                     # Optimize data to prevent context overflow (OOM)
                     optimized_data = self._optimize_campus_data(campus_data)
+
+                    # Apply country filter if the user asked "campus en <pays>"
+                    country_filter = _extract_country_filter(msg_lower)
+                    if country_filter:
+                        before = len(optimized_data)
+                        optimized_data = [
+                            c for c in optimized_data if (c.get("pays") or "").lower() == country_filter.lower()
+                        ]
+                        print(f"   ✓ Filtre pays '{country_filter}' : {before} -> {len(optimized_data)} campus")
+
+                    # Apply region filter if the user asked "campus en région <...>"
+                    region_filter = _extract_region_filter(msg_lower)
+                    if region_filter:
+                        before = len(optimized_data)
+                        allowed = {c.lower() for c in region_filter}
+                        optimized_data = [c for c in optimized_data if (c.get("ville") or "").lower() in allowed]
+                        print(f"   ✓ Filtre région '{' / '.join(region_filter)}' : {before} -> {len(optimized_data)} campus")
+
                     print(f"   ✓ Données optimisées : {len(optimized_data)} campus conservés après filtrage")
                     
                     # Convert to text to save tokens (JSON is too heavy)
@@ -438,9 +492,9 @@ class ChatService:
                     
                     total_campus = len(optimized_data)
                     context_extra += (
-                        f"\n\n[SYSTÈME: DONNÉES CAMPUS LIVE - {total_campus} CAMPUS TROUVÉS]\n"
+                        f"\n\n[SYSTÈME: DONNÉES CAMPUS LIVE - {total_campus} CAMPUS]\n"
                         f"⚠️ IMPORTANT : Il y a EXACTEMENT {total_campus} campus dans cette liste. "
-                        f"Tu DOIS tous les mentionner si on te demande de lister les campus.\n"
+                        f"Si l'utilisateur demande les campus d'un pays ou d'une région (ex: Espagne, Grand Est), réponds UNIQUEMENT avec ces campus filtrés.\n"
                         f"Même si les formations sont identiques (ex: Madrid/Barcelone), CITE CHAQUE VILLE SÉPARÉMENT.\n\n"
                         f"Liste complète des campus ({total_campus}) :\n"
                         f"{campus_text}\n\n"
