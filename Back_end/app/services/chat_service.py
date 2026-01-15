@@ -593,7 +593,9 @@ class ChatService:
             forms = ", ".join(c['formations'][:3]) if c['formations'] else "Toutes formations"  # Limiter à 3 formations max
             if len(c['formations']) > 3:
                 forms += f" (+{len(c['formations']) - 3} autres)"
-            lines.append(f"{idx}. {ville} ({pays}) : {forms}")
+            url = c.get("url")
+            url_part = f" (Source: {url})" if url else ""
+            lines.append(f"{idx}. {ville} ({pays}) : {forms}{url_part}")
         return "\n".join(lines)
 
     def _optimize_campus_data(self, data: Any) -> List[Dict]:
@@ -615,6 +617,7 @@ class ChatService:
             opt_campus = {
                 "ville": campus.get("ville"),
                 "pays": campus.get("pays"),
+                "url": campus.get("url"),
                 "formations": []
             }
             
