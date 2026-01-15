@@ -2,3 +2,4 @@ scrapy
 mcp
 fastapi
 uvicorn
+pydantic-settings
