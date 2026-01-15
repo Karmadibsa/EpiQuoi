@@ -137,27 +137,30 @@ class ChatService:
             msg_lower = request.message.lower()
 
             # -------------------------------------------------------------------------
+            # -------------------------------------------------------------------------
             # 0. GARDE-FOU IMMÉDIAT (FORBIDDEN TOPICS)
             # -------------------------------------------------------------------------
             # On vérifie si l'utilisateur parle de sujets interdits AVANT MÊME de lancer l'IA.
-            # Exception : si le mot "site" est présent (pour "site web"), on laisse passer "site" n'est pas interdit mais bon.
-            # On vérifie si un mot interdit est présent. Si "tech" ou "code" ou "web" est aussi présent, on peut être plus clément,
-            # mais dans le doute, on bloque les recettes etc.
-            is_forbidden = any(bad in msg_lower for bad in self.FORBIDDEN_KEYWORDS)
+            # Utilisation de REGEX pour éviter les faux positifs (ex: "votre" contient "vote").
             
-            # Sauf si c'est une "blague de dev" demandée explicitement dans un contexte tech
-            # (mais pour l'instant on bloque tout pour être sûr).
-            
-            if is_forbidden:
-                 print(f"   ⛔ SUJET INTERDIT DÉTECTÉ (Mot-clé trouvé dans le message)")
+            detected_forbidden = None
+            for bad_word in self.FORBIDDEN_KEYWORDS:
+                # Use \b for word boundaries to match whole words only (prevents 'droit' matching 'roi')
+                pattern = r"\b" + re.escape(bad_word) + r"\b"
+                if re.search(pattern, msg_lower):
+                    detected_forbidden = bad_word
+                    break
+
+            if detected_forbidden:
+                 print(f"   ⛔ SUJET INTERDIT DÉTECTÉ: '{detected_forbidden}'")
                  if user_lang != "fr":
                     return {
                         "response": "I am EpiQuoi, an expert on Epitech orientation. I cannot answer questions about other topics (cooking, weather, politics, general knowledge...). Do you have a question about the school?",
-                        "backend_source": "Guardrail (Forbidden Topic)",
+                        "backend_source": f"Guardrail (Forbidden: {detected_forbidden})",
                     }
                  return {
                     "response": "Je suis **EpiQuoi**, expert en orientation Epitech. Je ne peux pas répondre aux questions sur d'autres sujets (cuisine, météo, politique, culture générale...). As-tu une question sur l'école ?",
-                    "backend_source": "Guardrail (Sujet Interdit)",
+                    "backend_source": f"Guardrail (Sujet Interdit: {detected_forbidden})",
                 }
 
             # -------------------------------------------------------------------------
