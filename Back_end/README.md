@@ -21,14 +21,20 @@ Back_end/
 │   │   └── chat.py
 │   ├── services/             # Logique métier
 │   │   ├── __init__.py
-│   │   ├── chat_service.py
-│   │   ├── geocoding_service.py
-│   │   └── news_service.py
+│   │   ├── chat_service.py           # Orchestration + guardrails + prompt
+│   │   ├── campus_service.py         # Client HTTP -> serveur mcp
+│   │   ├── degrees_service.py        # Client HTTP -> serveur mcp
+│   │   ├── pedagogy_service.py       # Client HTTP -> serveur mcp
+│   │   ├── values_service.py         # Client HTTP -> serveur mcp
+│   │   ├── geocoding_service.py      # Géocodage / campus le + proche
+│   │   └── news_service.py           # Scrapy (nécessite un scraper externe)
 │   └── utils/                # Utilitaires
 │       ├── __init__.py
-│       ├── campus_data.py
-│       ├── geo_utils.py
-│       └── language_detection.py
+│       ├── campus_data.py            # Données + helpers campus (sans coordonnées injectées)
+│       ├── epitech_faq.py            # Réponses “FAQ” (ex: méthodologie)
+│       ├── geo_utils.py              # Haversine, etc.
+│       ├── language_detection.py
+│       └── tool_router.py            # Routage d’intentions vers les tools mcp
 ├── main.py                   # Point d'entrée pour lancer l'application
 ├── requirements.txt
 └── README.md
@@ -38,12 +44,14 @@ Back_end/
 
 1. Installer les dépendances :
 ```bash
-pip install -r requirements.txt
+python3 -m venv venv
+./venv/bin/pip install -r requirements.txt
 ```
 
 2. Créer un fichier `.env` à la racine du dossier `Back_end` :
 ```env
-OLLAMA_MODEL=llama3.1
+OLLAMA_MODEL=llama3.2:1b
+OLLAMA_URL=http://localhost:11434
 ```
 
 ## Utilisation
@@ -51,12 +59,12 @@ OLLAMA_MODEL=llama3.1
 ### Lancer le serveur
 
 ```bash
-python main.py
+./venv/bin/python main.py
 ```
 
 Ou avec uvicorn directement :
 ```bash
-uvicorn app.main:app --reload
+./venv/bin/uvicorn app.main:app --reload
 ```
 
 Le serveur sera accessible sur `http://localhost:8000`
@@ -66,6 +74,16 @@ Le serveur sera accessible sur `http://localhost:8000`
 Une fois le serveur lancé, la documentation interactive est disponible sur :
 - Swagger UI : `http://localhost:8000/docs`
 - ReDoc : `http://localhost:8000/redoc`
+
+### Dépendance: serveur `mcp` (tools)
+
+Le backend appelle le serveur `mcp` sur `http://localhost:8001` pour :
+- campus (`POST /scrape/campus`)
+- formations/diplômes (`POST /scrape/degrees`)
+- pédagogie (`POST /scrape/pedagogy`)
+- valeurs (`POST /scrape/values`)
+
+Assure-toi que `mcp/server.py` tourne avant de tester ces fonctionnalités.
 
 ## Structure des modules
 
@@ -81,15 +99,18 @@ Routes FastAPI organisées par domaine fonctionnel.
 
 ### `app/services/`
 Logique métier isolée dans des services :
-- **ChatService** : Gestion des interactions avec Ollama, détection d'intentions, construction des prompts
+- **ChatService** : Orchestration (LLM + tools), gestion d’historique, guardrails anti-hallucination
+- **Campus/Degrees/Pedagogy/ValuesService** : Clients HTTP vers `mcp`
 - **GeocodingService** : Recherche du campus le plus proche basée sur la localisation
-- **NewsService** : Récupération des actualités Epitech via Scrapy
+- **NewsService** : Récupération d’actualités via Scrapy (nécessite un projet Scrapy séparé)
 
 ### `app/utils/`
 Utilitaires réutilisables :
 - **campus_data.py** : Données des campus Epitech
 - **geo_utils.py** : Fonctions de calcul géographique (distance haversine)
 - **language_detection.py** : Détection automatique de la langue
+- **tool_router.py** : Routage d’intentions (quand appeler un tool)
+- **epitech_faq.py** : Réponses rapides “FAQ”
 
 ### `app/exceptions.py`
 Exceptions personnalisées pour une meilleure gestion d'erreurs.
@@ -100,7 +121,8 @@ Exceptions personnalisées pour une meilleure gestion d'erreurs.
 |----------|-------------|--------|
 | `OLLAMA_MODEL` | Modèle Ollama à utiliser | `llama3.1` |
 | `OLLAMA_TEMPERATURE` | Température pour la génération | `0.3` |
-| `CORS_ORIGINS` | Origines CORS autorisées (séparées par virgule) | `http://localhost:5173,http://127.0.0.1:5173` |
+| `OLLAMA_URL` | URL du serveur Ollama | `http://localhost:11434` |
+| `CORS_ORIGINS` | Origines CORS autorisées (séparées par virgule) | `http://localhost:5173,http://127.0.0.1:5173,...` |
 
 ## Best Practices implémentées
 

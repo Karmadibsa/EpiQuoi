@@ -1,26 +1,59 @@
 # EpiQuoi
 
-EpiQuoi est une application de chat conçue pour les étudiants d'Epitech, dotée d'une interface moderne ressemblant et intégrant une intelligence artificielle locale (Ollama).
+EpiQuoi est une application de chat orientée **Epitech** avec :
+- un **frontend** React (Vite)
+- un **backend** FastAPI qui parle à une IA locale (Ollama)
+- un serveur **mcp** (FastAPI) qui expose des “outils” (scraping Epitech)
 
-## Structure du Projet
+## Structure du projet
 
-Le projet est organisé en trois modules principaux :
+- `Front_End/` : interface (Vite + React)
+- `Back_end/` : API IA (FastAPI) + logique d’orchestration
+- `mcp/` 
 
-- **Front_End/** : L'application React (Vite) pour l'interface utilisateur.
-- **Back_end/** : Le serveur Python (FastAPI) qui gère la logique et la communication avec l'IA.
-- **MCP_Server/** : Le serveur MCP (Model Context Protocol) pour donner des outils à l'IA (Scraping, etc.) - *En cours de développement*.
-
-## Guide de Démarrage
+## Démarrage rapide (dev)
 
 ### Pré-requis
 
-1.  Avoir **Node.js** installé (pour le frontend).
-2.  Avoir **Python 3.10+** associé (pour le backend).
-3.  Avoir **Ollama** installé et le modèle Mistral téléchargé (`ollama pull mistral`).
+- Node.js (pour `Front_End/`)
+- Python 3.10+ (pour `Back_end/` et `mcp/`)
+- Ollama installé + un modèle téléchargé (ex : `ollama pull llama3.2:1b`)
 
-### 1. Lancer le Front-End (Interface)
+### 1) Lancer le serveur d’outils (`mcp`) — port 8001
 
-Dans un premier terminal :
+```bash
+cd mcp
+python3 -m venv venv
+./venv/bin/pip install -r requirements.txt
+./venv/bin/python server.py
+```
+
+Test rapide :
+- `http://localhost:8001/healthz`
+
+### 2) Lancer le backend (`Back_end`) — port 8000
+
+Créer `Back_end/.env` (optionnel mais recommandé) :
+
+```env
+OLLAMA_MODEL=llama3.1
+OLLAMA_URL=http://localhost:11434
+```
+
+Puis :
+
+```bash
+cd Back_end
+python3 -m venv venv
+./venv/bin/pip install -r requirements.txt
+./venv/bin/python main.py
+```
+
+Endpoints utiles :
+- `http://localhost:8000/docs`
+- `POST http://localhost:8000/chat`
+
+### 3) Lancer le frontend (`Front_End`) — port 5173
 
 ```bash
 cd Front_End
@@ -28,31 +61,10 @@ npm install
 npm run dev
 ```
 
-L'application sera accessible sur `http://localhost:5173`.
+Par défaut, le frontend appelle `http://localhost:8000/chat`.
+Pour changer l’URL, définir `VITE_API_URL` (voir `Front_End/README.md`).
 
-### 2. Lancer le Back-End (Serveur IA)
+## Notes
 
-Dans un second terminal :
-
-```bash
-cd Back_end
-pip install -r requirements.txt
-python main.py
-```
-
-Le serveur tournera sur `http://localhost:8000`.
-
-### Configuration
-
-Le backend utilise un fichier `.env`. Assurez-vous d'avoir créé ce fichier dans le dossier `Back_end/` avec le contenu suivant :
-
-```env
-OLLAMA_MODEL=mistral
-OLLAMA_URL=http://localhost:11434
-```
-
-## Fonctionnalités Actuelles
-
-*   Chat en temps réel avec une IA locale (Mistral).
-*   Interface visuelle "Epitech Blue".
-*   Architecture prête pour le Scraping et le MCP.
+- Si le backend n’est pas joignable, le widget passe en mode “fallback” et demande un **code postal** (côté frontend).
+- Le backend appelle `mcp` sur `http://localhost:8001` pour récupérer des infos officielles (campus / formations / pédagogie / valeurs).

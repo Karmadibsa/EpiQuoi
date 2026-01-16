@@ -1,16 +1,40 @@
-# React + Vite
+# EpiQuoi Frontend (Vite + React)
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Frontend de l’application EpiQuoi.
 
-Currently, two official plugins are available:
+## Démarrage (dev)
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+```bash
+cd Front_End
+npm install
+npm run dev
+```
 
-## React Compiler
+Le frontend est accessible sur `http://localhost:5173`.
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+## Configuration API
 
-## Expanding the ESLint configuration
+Par défaut, le frontend envoie les messages au backend à :
+- `http://localhost:8000/chat`
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+Tu peux override via une variable d’environnement Vite :
+
+```bash
+VITE_API_URL="http://localhost:8000/chat" npm run dev
+```
+
+Ou via un fichier `.env` dans `Front_End/` :
+
+```env
+VITE_API_URL=http://localhost:8000/chat
+```
+
+## Fallback (si le backend est indisponible)
+
+Si `POST /chat` échoue, le widget passe temporairement en mode “fallback” et demande un **code postal**.
+Ce comportement est implémenté dans `src/hooks/useChat.js`.
+
+## Docs utiles
+
+- `WIDGET_INTEGRATION.md` : intégration du widget dans une page
+- `DEPLOY_GUIDE.md` : déploiement (Netlify, etc.)
