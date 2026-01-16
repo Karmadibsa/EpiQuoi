@@ -130,10 +130,6 @@ Exceptions personnalisées pour une meilleure gestion d'erreurs.
 2. **Configuration centralisée** : Toutes les configs dans `config.py` avec validation
 3. **Gestion d'erreurs** : Exceptions personnalisées avec codes HTTP appropriés
 4. **Logging structuré** : Utilisation du module `logging` standard
-5. **Validation des données** : Modèles Pydantic pour toutes les entrées/sorties
-6. **Type hints** : Typage complet pour une meilleure maintenabilité
-7. **Documentation** : Docstrings sur toutes les fonctions et classes
-8. **Modularité** : Code réutilisable et testable
 
 ## Tests
 
