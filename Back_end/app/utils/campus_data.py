@@ -154,12 +154,16 @@ def get_all_campus_names() -> list[str]:
 
 
 def format_campus_list() -> str:
-    """Format all campuses into a string for system prompts."""
+    """
+    Format all campuses into a string for system prompts.
+    
+    IMPORTANT:
+    - We intentionally do NOT include address/phone/email here to avoid outdated info and hallucinations.
+    - The assistant must redirect users to the official contact page when they ask for coordinates.
+    """
     formatted = ""
     for city, data in CAMPUSES.items():
         formatted += (
-            f"- {city.upper()}: {data['addr']} "
-            f"(Tel: {data.get('phone', 'N/A')}, "
-            f"Email: {data.get('email', 'N/A')})\n"
+            f"- {city.upper()} ({data.get('country', 'N/A')})\n"
         )
     return formatted
