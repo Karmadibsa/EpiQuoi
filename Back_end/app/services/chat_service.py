@@ -235,7 +235,8 @@ class ChatService:
                 }
 
             # "Devise / valeurs" Epitech: always use official source (no hallucination).
-            if ("epitech" in msg_lower) and any(k in msg_lower for k in ("devise", "valeur", "valeurs")):
+            # Accept questions about values/motto even without "epitech" - context is implicit in this bot.
+            if any(k in msg_lower for k in ("devise", "valeur", "valeurs")):
                 wants_source = any(k in msg_lower for k in ("source", "sources", "lien", "liens", "url", "officiel"))
                 values_payload = await self.values_service.get_values_info()
                 if values_payload and isinstance(values_payload, dict):
@@ -366,6 +367,9 @@ class ChatService:
                 or ("pedagogie" in msg_lower)
                 or ("méthodologie" in msg_lower)
                 or ("methodologie" in msg_lower)
+                or ("valeur" in msg_lower)
+                or ("valeurs" in msg_lower)
+                or ("devise" in msg_lower)
             )
 
 
