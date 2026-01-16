@@ -234,6 +234,113 @@ class ChatService:
                     "backend_source": "Small-talk",
                 }
 
+            # -------------------------
+            # Deterministic contact/coordinates answers (no LLM, no hallucinations)
+            # -------------------------
+            contact_keywords = (
+                "coordonnée",
+                "coordonne",
+                "coordonnées",
+                "telephone",
+                "téléphone",
+                "tel",
+                "tél",
+                "email",
+                "e-mail",
+                "mail",
+                "courriel",
+                "adresse",
+                "address",
+                "contact",
+            )
+
+            def _is_contact_question() -> bool:
+                s = msg_lower
+                if any(k in s for k in contact_keywords):
+                    return True
+                # Also catch "comment les joindre" / "les joindre"
+                if "joindre" in s or "contacter" in s:
+                    return True
+                return False
+
+            async def _resolve_city_for_contact() -> str | None:
+                """
+                Resolve which campus city to provide contacts for:
+                - if a campus city is explicitly mentioned: use it
+                - else if a user location is present (zip/city): use nearest campus via geocoding
+                """
+                # Prefer explicit campus city names in the message (from static CAMPUSES list / aliases)
+                loc_q = self._extract_location_query(request.message, msg_lower)
+                if loc_q:
+                    direct = self._find_direct_city_match(loc_q)
+                    if direct:
+                        return direct
+
+                    geo = await self.geocoding_service.get_nearest_campus(loc_q)
+                    if geo:
+                        nearest_overall, nearest_in_country, _info = geo
+                        # Prefer in-country campus when available
+                        rec = nearest_in_country or nearest_overall
+                        return rec["city"]
+                return None
+
+            if _is_contact_question():
+                city = await _resolve_city_for_contact()
+                # Always fetch official campus contacts from MCP tool
+                campus_payload = await self.campus_service.get_campus_info()
+                data_list = []
+                if isinstance(campus_payload, dict) and isinstance(campus_payload.get("data"), list):
+                    data_list = campus_payload.get("data")
+                elif isinstance(campus_payload, list):
+                    data_list = campus_payload
+
+                # If user didn't specify any city/location, ask for it
+                if not city:
+                    return {
+                        "response": (
+                            "Tu veux les coordonnées de **quel campus** (ville) ?\n\n"
+                            "Exemples : Paris, Lyon, Nancy… (ou donne ta ville/code postal et je te donne le campus le plus proche)."
+                        ),
+                        "backend_source": "Contacts (clarification)",
+                    }
+
+                # Find matching campus (by ville)
+                selected = None
+                for c in data_list:
+                    if not isinstance(c, dict):
+                        continue
+                    if (c.get("ville") or "").strip().lower() == city.strip().lower():
+                        selected = c
+                        break
+
+                if not selected:
+                    # Fallback: we know the campus city list from CAMPUSES (static), but contacts should come from official page
+                    return {
+                        "response": (
+                            f"Je n’arrive pas à récupérer les coordonnées officielles pour **{city}** pour le moment.\n\n"
+                            "Tu peux les retrouver ici : https://www.epitech.eu/contact/"
+                        ),
+                        "backend_source": "Contacts (fallback link)",
+                    }
+
+                # Build deterministic response from official data
+                addr_lines = selected.get("adresse_lignes") if isinstance(selected.get("adresse_lignes"), list) else []
+                addr = "\n".join([str(x) for x in addr_lines if x]) if addr_lines else None
+                email = selected.get("email")
+                tel = selected.get("telephone")
+                src = selected.get("contact_source_url") or "https://www.epitech.eu/contact/"
+
+                parts = [f"Coordonnées **Epitech {city}** (source officielle) :"]
+                if addr:
+                    parts.append(f"- Adresse :\n{addr}")
+                if email:
+                    parts.append(f"- Email : {email}")
+                if tel:
+                    parts.append(f"- Téléphone : {tel}")
+                parts.append(f"\nSource : {src}")
+
+                return {"response": "\n".join(parts), "backend_source": "MCP Tool (contact)"}
+
             # "Devise / valeurs" Epitech: always use official source (no hallucination).
             if ("epitech" in msg_lower) and any(k in msg_lower for k in ("devise", "valeur", "valeurs")):
                 wants_source = any(k in msg_lower for k in ("source", "sources", "lien", "liens", "url", "officiel"))
@@ -822,9 +929,13 @@ class ChatService:
             print("✅ REQUÊTE TRAITÉE AVEC SUCCÈS")
             print(f"   Source: {backend_source}")
             print("=" * 60 + "\n")
+
+            # Final safety: do not leak hallucinated coordinates (email/phone/address).
+            raw_text = response["message"]["content"]
+            cleaned_text = self._sanitize_contact_like_output(raw_text)
             
             return {
-                "response": response['message']['content'],
+                "response": cleaned_text,
                 "backend_source": backend_source
             }
 
@@ -938,12 +1049,11 @@ class ChatService:
         if direct_city_match:
             logger.info(f"Direct city match: {direct_city_match}")
             city = direct_city_match
-            data = CAMPUSES[city]
             return (
                 f"\n\n[INFO SYSTÈME: CAMPUS PRÉSENT !]\n"
-                f"Epitech est à {city.upper()} !\n"
-                f"Adresse : {data['addr']}.\n"
-                f"Contact : {data.get('email', 'N/A')} | {data.get('phone', 'N/A')}\n"
+                f"Campus détecté : {city.upper()}.\n"
+                "⚠️ Ne fournis pas d'email/téléphone/adresse ici (ça peut changer). "
+                "Si l'utilisateur demande des coordonnées, redirige vers https://www.epitech.eu/contact/.\n"
             )
 
         # Use geocoding API
@@ -981,9 +1091,9 @@ class ChatService:
         if is_same_city or rec_dist < 10:
             return (
                 f"\n\n[INFO SYSTÈME: CAMPUS PRÉSENT !]\n"
-                f"Epitech est à {rec_city.upper()} !\n"
-                f"Adresse : {rec_data['addr']}.\n"
-                f"Contact : {rec_data.get('email', 'N/A')} | {rec_data.get('phone', 'N/A')}\n"
+                f"Campus recommandé : {rec_city.upper()}.\n"
+                "⚠️ Ne fournis pas d'email/téléphone/adresse ici (ça peut changer). "
+                "Si l'utilisateur demande des coordonnées, redirige vers https://www.epitech.eu/contact/.\n"
             )
         else:
             priority_msg = (
@@ -993,8 +1103,8 @@ class ChatService:
                 f"\n\n[INFO SYSTÈME: LOCALISATION]\n"
                 f"Localisation détectée : '{location_query}' ({user_detected_info}).\n"
                 f"Campus recommandé ({priority_msg}) : {rec_city.upper()} ({rec_dist} km).\n"
-                f"Adresse : {rec_data['addr']}.\n"
-                f"Contact : {rec_data.get('email', 'N/A')} | {rec_data.get('phone', 'N/A')}\n"
+                "⚠️ Ne fournis pas d'email/téléphone/adresse (ça peut changer). "
+                "Si l'utilisateur demande des coordonnées, redirige vers https://www.epitech.eu/contact/.\n"
             )
 
             if not is_same_city and rec_dist > 5:
@@ -1139,19 +1249,21 @@ class ChatService:
 
             "### FAITS (ANTI-HALLUCINATION)\n"
             "- Epitech est une **école** (pas une université). Ne dis JAMAIS \"Université Epitech\".\n\n"
+            "- Ne promets JAMAIS qu'une formation est disponible dans une ville précise sans source explicite.\n"
+            "  Si on te demande 'où faire cette formation' : donne la/les pages officielles du programme et dis que la disponibilité dépend du campus.\n\n"
 
             "### LANGUE (IMPORTANT)\n"
             "Tu réponds UNIQUEMENT en **français**.\n\n"
 
             "### ⚠️ VÉRITÉ GÉOGRAPHIQUE - RÈGLE ABSOLUE (CRITIQUE) ⚠️\n"
-            "Voici la base de données OFFICIELLE et EXCLUSIVE des campus Epitech. TU NE DOIS JAMAIS INVENTER UNE AUTRE ADRESSE.\n"
+            "Voici la liste EXCLUSIVE des villes où Epitech a un campus (ne pas inventer de villes).\n"
             "---------------------------------------------------------------------------------------------------------\n"
             f"{full_campus_list_str}"
             "---------------------------------------------------------------------------------------------------------\n"
             "RÈGLES IMPÉRATIVES :\n"
-            "1. Si on te demande l'adresse de Paris, Lille, Bordeaux... COPIE-COLLE L'ADRESSE DE LA LISTE CI-DESSUS.\n"
-            "2. Si l'utilisateur demande une ville NON listée (ex: Metz, Brest...) : TU DOIS DIRE qu'il n'y a pas de campus.\n"
-            "3. N'INVENTE JAMAIS RIEN. Utilise uniquement la liste ci-dessus.\n\n"
+            "1. Si l'utilisateur demande une ville NON listée (ex: Metz, Brest...) : dis qu'il n'y a pas de campus Epitech dans cette ville.\n"
+            "2. N'INVENTE JAMAIS d'adresse, d'email, de téléphone.\n"
+            "3. Si l'utilisateur demande des coordonnées (adresse/email/tél) : redirige vers la page officielle **https://www.epitech.eu/contact/**.\n\n"
 
             "### PROTOCOLE DE PROFILAGE (CRITIQUE)\n"
             "⚠️ AVANT DE DEMANDER LE NIVEAU D'ÉTUDES, VÉRIFIE SI L'UTILISATEUR L'A DÉJÀ MENTIONNÉ !\n"
@@ -1168,8 +1280,8 @@ class ChatService:
             "SI SIGNAL DÉTECTÉ :\n"
             "   1. Confirme son intérêt (ex: 'Content que ça te plaise !').\n"
             "   2. Propose NATURELLEMENT de passer à l'étape suivante (contact, visite, candidature).\n"
-            "   3. Donne les coordonnées du campus le plus pertinent (Localisation utilisateur OU Campus mentionné).\n"
-            "      SI AUCUNE VILLE DÉTECTÉE : Donne les coordonnées génériques ou demande sa ville.\n"
+            "   3. Donne le **campus recommandé** (ville) et propose le lien officiel **https://www.epitech.eu/contact/**.\n"
+            "      SI AUCUNE VILLE DÉTECTÉE : demande sa ville.\n"
             "   4. RESTE NATUREL : pas de forcing commercial.\n\n"
 
             "### INTERDICTIONS STRICTES\n"
@@ -1216,3 +1328,41 @@ class ChatService:
         messages.append({'role': 'user', 'content': final_user_content})
 
         return messages
+
+    def _sanitize_contact_like_output(self, text: str) -> str:
+        """
+        Remove likely hallucinated or outdated coordinates (email/phone/address lines).
+        We prefer redirecting users to the official contact page instead of providing risky details.
+        """
+        if not text or not isinstance(text, str):
+            return text
+
+        email_re = re.compile(r"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}", re.IGNORECASE)
+        phone_re = re.compile(r"(\+?\d[\d\s().-]{7,}\d)")
+
+        removed_any = False
+        kept_lines: list[str] = []
+        for line in text.splitlines():
+            low = line.lower()
+            if (
+                "tél" in low
+                or "tel" in low
+                or "téléphone" in low
+                or "telephone" in low
+                or "courriel" in low
+                or "email" in low
+                or "e-mail" in low
+                or low.strip().startswith("adresse")
+                or low.strip().startswith("address")
+                or email_re.search(line)
+                or phone_re.search(line)
+            ):
+                removed_any = True
+                continue
+            kept_lines.append(line)
+
+        cleaned = "\n".join(kept_lines).strip()
+        if removed_any:
+            if "epitech.eu/contact" not in cleaned:
+                cleaned = (cleaned + "\n\n" if cleaned else "") + "Pour des coordonnées à jour, consulte : https://www.epitech.eu/contact/"
+        return cleaned
