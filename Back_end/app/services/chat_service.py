@@ -124,6 +124,53 @@ class ChatService:
             backend_source = f"Ollama Local ({settings.ollama_model})"
             msg_lower = request.message.lower()
 
+            # -------------------------
+            # Small-talk / salutations
+            # -------------------------
+            def _looks_like_greeting(text: str) -> bool:
+                t = (text or "").strip().lower()
+                if not t:
+                    return False
+                greeting_terms = (
+                    "bonjour",
+                    "salut",
+                    "coucou",
+                    "bonsoir",
+                    "hey",
+                    "yo",
+                    "hello",
+                )
+                smalltalk_terms = (
+                    "ça va",
+                    "ca va",
+                    "comment ça va",
+                    "comment ca va",
+                    "tu vas bien",
+                    "tu va bien",
+                    "ça roule",
+                    "ca roule",
+                )
+                if t in greeting_terms:
+                    return True
+                if any(w in t for w in greeting_terms) and len(t) <= 25:
+                    return True
+                if any(w in t for w in smalltalk_terms):
+                    return True
+                return False
+
+            def _recent_epitech_context() -> bool:
+                # current message
+                if "epitech" in msg_lower:
+                    return True
+                # recent history (user or bot)
+                for turn in reversed(request.history[-6:]):
+                    tt = (turn.text or "").lower()
+                    if "epitech" in tt:
+                        return True
+                    if any(k in tt for k in ("campus", "formation", "formations", "msc", "bachelor", "mba", "admission", "pédagog", "pedagog")):
+                        return True
+                return False
+
             def _extract_country_filter(msg_lower_val: str) -> str | None:
                 """
                 Return a canonical country name matching our campus data (French labels),
@@ -167,6 +214,24 @@ class ChatService:
                 return {
                     "response": "Je réponds uniquement en **français**. Pose-moi ta question sur Epitech.",
                     "backend_source": "Preference (language=fr-only)",
+                }
+
+            # Handle greetings / small-talk early, so it doesn't trigger the off-topic guard.
+            if _looks_like_greeting(request.message):
+                if _recent_epitech_context():
+                    return {
+                        "response": (
+                            "Salut ! Ça va 🙂\n\n"
+                            "On continue sur Epitech : tu veux parler **campus**, **formations**, **admissions** ou **pédagogie** ?"
+                        ),
+                        "backend_source": "Small-talk (in-context)",
+                    }
+                return {
+                    "response": (
+                        "Salut ! Ça va 🙂\n\n"
+                        "Je peux t’aider sur **Epitech** (campus, formations, admissions, pédagogie). Tu veux savoir quoi ?"
+                    ),
+                    "backend_source": "Small-talk",
                 }
 
             # "Devise / valeurs" Epitech: always use official source (no hallucination).
@@ -363,7 +428,10 @@ class ChatService:
                         "backend_source": "Off-topic",
                     }
                 return {
-                    "response": "Je suis **EpiQuoi** : je réponds uniquement aux questions liées à **Epitech** (campus, formations, admissions). Tu veux savoir quoi sur Epitech ?",
+                    "response": (
+                        "Je peux t’aider uniquement sur **Epitech** (campus, formations, admissions, pédagogie). "
+                        "Tu veux savoir quoi ?"
+                    ),
                     "backend_source": "Off-topic",
                 }
 
@@ -426,6 +494,15 @@ class ChatService:
                     call=True,
                     score=tool_decisions["degrees"].score,
                     reasons=tool_decisions["degrees"].reasons + ["forced follow-up (level answer after formations question)"],
+                )
+
+            # If user asks for a specific domain (health/biotech/medical), force degrees tool to avoid inventing diplomas.
+            domain_terms = ("santé", "sante", "biotech", "biotechnologie", "médical", "medical", "hôpital", "hopital")
+            if ("epitech" in msg_lower) and any(t in msg_lower for t in domain_terms):
+                tool_decisions["degrees"] = ToolDecision(
+                    call=True,
+                    score=tool_decisions["degrees"].score,
+                    reasons=tool_decisions["degrees"].reasons + ["forced degrees (domain question)"],
                 )
 
             # If it's clearly Epitech-related but router is unsure, do a light speculative scrape in parallel
@@ -564,6 +641,8 @@ class ChatService:
                     # Build a compact, source-first block (LLM must cite URLs).
                     sources: list[str] = []
                     blocks: list[str] = []
+                    domain_terms = ("santé", "sante", "biotech", "biotechnologie", "médical", "medical", "hôpital", "hopital")
+                    domain_query = [t for t in domain_terms if t in msg_lower]
                     for prog in items:
                         if not isinstance(prog, dict):
                             continue
@@ -588,6 +667,14 @@ class ChatService:
                             desc = p.get("description")
                             snippet = p.get("snippet")
                             duration_hints = p.get("duration_hints") if isinstance(p.get("duration_hints"), list) else []
+
+                            # If the user asked a domain question (e.g., santé),
+                            # only keep pages that actually mention the domain in title/description/snippet.
+                            if domain_query:
+                                hay = " ".join([str(x or "") for x in (title, desc, snippet)]).lower()
+                                if not any(t in hay for t in domain_query):
+                                    continue
+
                             line = f"- {title}" if title else "- Page"
                             if snippet and isinstance(snippet, str):
                                 line += f": {snippet[:220]}{'…' if len(snippet) > 220 else ''}"
@@ -602,7 +689,8 @@ class ChatService:
                             if len(page_lines) >= 2:
                                 break
 
-                        blocks.append(header + "\n" + "\n".join(page_lines))
+                        if page_lines:
+                            blocks.append(header + "\n" + "\n".join(page_lines))
 
                     # Deduplicate sources while preserving order
                     seen = set()
@@ -627,6 +715,7 @@ class ChatService:
                         "- N'INVENTE PAS de spécialités/secteurs (ex: santé, énergie, biotech...) si ce n'est pas dans la liste ci-dessus.\n"
                         "- N'INVENTE PAS de durées (1 an / 2 ans / etc.) : ne donne une durée que si elle apparaît dans les lignes \"Durée repérée\" ci-dessus, et cite la page correspondante.\n"
                         "- Si l'utilisateur demande le **MBA**, et que des pages MBA sont dans les SOURCES, tu DOIS confirmer que le MBA existe et répondre UNIQUEMENT avec ces pages (ne le nie jamais).\n"
+                        "- Si l'utilisateur demande un domaine précis (ex: santé), et qu'aucune page ne correspond dans les sources, dis clairement que tu n'as pas d'information officielle sur une spécialisation santé, et propose les alternatives (IA/Data/Cyber) sans inventer de diplôme.\n"
                         "- Si l'utilisateur demande le détail des spécialisations, dis que tu peux expliquer les grandes familles (PGE/MSc/Coding Academy) mais que tu n'as pas le catalogue complet.\n"
                         "- Quand tu donnes un détail (programme/specialisation), ajoute la/les URL(s) correspondantes en 'Sources:' à la fin.\n"
                         "Utilise ces données comme source prioritaire si l'utilisateur demande les diplômes, programmes ou cursus."

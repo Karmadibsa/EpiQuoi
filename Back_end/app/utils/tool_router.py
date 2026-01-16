@@ -81,6 +81,16 @@ class ToolRouter:
         "web@academie",
         "grande ecole",
         "grande école",
+        # Domain intents (avoid hallucinating "DUT santé", etc. by forcing degrees tool)
+        "santé",
+        "sante",
+        "health",
+        "biotech",
+        "biotechnologie",
+        "hôpital",
+        "hopital",
+        "médical",
+        "medical",
     )
     NEWS_HINTS = ("news", "actualité", "actu", "nouveauté", "événement")
     PEDAGOGY_HINTS = ("méthodologie", "methodologie", "pédagogie", "pedagogie", "pédago", "pedago")
