@@ -75,7 +75,7 @@ Une fois le serveur lancé, la documentation interactive est disponible sur :
 - Swagger UI : `http://localhost:8000/docs`
 - ReDoc : `http://localhost:8000/redoc`
 
-### Dépendance: serveur `mcp` (tools)
+### Dépendance: `mcp` (tools)
 
 Le backend appelle le serveur `mcp` sur `http://localhost:8001` pour :
 - campus (`POST /scrape/campus`)
