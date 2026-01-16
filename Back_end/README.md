@@ -101,8 +101,6 @@ Routes FastAPI organisées par domaine fonctionnel.
 Logique métier isolée dans des services :
 - **ChatService** : Orchestration (LLM + tools), gestion d’historique, guardrails anti-hallucination
 - **Campus/Degrees/Pedagogy/ValuesService** : Clients HTTP vers `mcp`
-- **GeocodingService** : Recherche du campus le plus proche basée sur la localisation
-- **NewsService** : Récupération d’actualités via Scrapy (nécessite un projet Scrapy séparé)
 
 ### `app/utils/`
 Utilitaires réutilisables :
