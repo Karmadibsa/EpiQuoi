@@ -291,6 +291,7 @@ class ChatService:
                 or ("specialisations" in msg_lower)
                 or ("spécialisations" in msg_lower)
                 or ("msc" in msg_lower)
+                or ("master" in msg_lower)
                 or ("bachelor" in msg_lower)
                 or ("mba" in msg_lower)
                 or ("coding academy" in msg_lower)
@@ -302,6 +303,39 @@ class ChatService:
                 or ("méthodologie" in msg_lower)
                 or ("methodologie" in msg_lower)
             )
+            
+            # Domaines d'études/métiers liés aux formations Epitech
+            # Ces mots-clés indiquent que l'utilisateur parle de choix de formation
+            study_domain_keywords = [
+                "cyber", "cybersécurité", "sécurité", "security",
+                "data", "données", "big data", "analytics",
+                "ia", "intelligence artificielle", "machine learning", "deep learning",
+                "cloud", "web3", "blockchain", "devops",
+                "iot", "objets connectés", "robotique",
+                "vr", "réalité virtuelle", "réalité augmentée", "immersif",
+                "santé", "health", "medtech", "healthtech",
+                "fintech", "finance", "trading",
+                "marketing", "influence", "digital",
+                "management", "business", "entrepreneuriat", "startup",
+                "luxe", "retail", "rh", "ressources humaines",
+                "développeur", "developpeur", "dev", "full stack", "fullstack",
+                "informatique", "info", "tech", "numérique", "digital",
+            ]
+            has_study_domain = any(domain in msg_lower for domain in study_domain_keywords)
+            
+            # Patterns indiquant une question d'orientation professionnelle/études
+            career_orientation_patterns = [
+                r"j'aimerais (bien )?(travailler|bosser|faire)",
+                r"je (veux|voudrais|souhaite) (travailler|faire|devenir)",
+                r"je (veux|voudrais|souhaite) (m'orienter|me spécialiser)",
+                r"quel (domaine|secteur|métier)",
+                r"dans (le|quel) domaine",
+                r"comme (métier|travail|carrière)",
+                r"après (le|mon) (master|msc|bachelor|diplôme)",
+                r"débouchés?",
+                r"quel(le)?s? (formation|master|msc|bachelor)",
+            ]
+            has_career_orientation = any(re.search(p, msg_lower) for p in career_orientation_patterns)
 
 
             # Allow tiny follow-ups that rely on previous context (level confirmations, yes/no, city).
@@ -328,7 +362,7 @@ class ChatService:
                     if turn.sender == "bot" and not turn.isError:
                         bot_text = (turn.text or "").lower()
                         # Le bot a parlé de campus, formations, ou Epitech
-                        if any(kw in bot_text for kw in ["epitech", "campus", "formation", "msc", "bachelor", "pge", "programme"]):
+                        if any(kw in bot_text for kw in ["epitech", "campus", "formation", "msc", "bachelor", "pge", "programme", "master", "mba"]):
                             return True
                         break  # On ne regarde que le dernier message bot
                 return False
@@ -344,13 +378,16 @@ class ChatService:
             ]
             has_context_reference = any(re.search(p, msg_stripped) for p in context_reference_patterns)
             
+            # Un message est un suivi valide si...
             is_short_followup = (
-                len(msg_stripped) <= 80  # Augmenté pour permettre des phrases de contexte
+                len(msg_stripped) <= 100  # Augmenté pour les phrases d'orientation
                 and (
                     degrees_followup
                     or has_followup_phrase
                     or has_context_reference  # Référence explicite au contexte
-                    or (last_bot_epitech and len(msg_stripped) <= 50)  # Message court après réponse Epitech
+                    or has_career_orientation  # Question d'orientation professionnelle
+                    or (has_study_domain and last_bot_epitech)  # Domaine d'études après réponse Epitech
+                    or (last_bot_epitech and len(msg_stripped) <= 60)  # Message court après réponse Epitech
                     or re.search(r"\bbac\s*\+\s*\d\b", msg_stripped) is not None
                     or any(city.lower() == msg_stripped for city in CAMPUSES.keys())
                 )
@@ -1079,14 +1116,25 @@ class ChatService:
             "3. **COHÉRENCE DES RECOMMANDATIONS** - Respecte le domaine d'intérêt de l'utilisateur !\n"
             "   - Si l'utilisateur mentionne un domaine (cyber, IA, data, cloud, etc.), propose des formations dans CE domaine\n"
             "   - Ne change PAS de domaine sauf si l'utilisateur le demande explicitement\n"
-            "   - Base-toi sur les informations de formations qui te sont fournies dans le contexte\n\n"
+            "   - Base-toi UNIQUEMENT sur les informations de formations fournies dans le contexte\n\n"
 
-            "### 📚 FORMATIONS EPITECH\n"
-            "Les informations sur les formations (Bachelor, MSc, MBA, etc.) te seront fournies via les données scrapées.\n"
-            "⚠️ RÈGLES :\n"
-            "- Utilise UNIQUEMENT les formations mentionnées dans les données injectées\n"
-            "- N'INVENTE PAS de formations, spécialisations ou programmes\n"
-            "- Si tu n'as pas l'info, dis : 'Je t'invite à consulter epitech.eu pour la liste complète des formations'\n\n"
+            "### 📚 FORMATIONS EPITECH - RÈGLE CRITIQUE 📚\n"
+            "⚠️ TU NE CONNAIS QUE LES FORMATIONS QUI TE SONT DONNÉES DANS LE CONTEXTE !\n\n"
+            
+            "❌ EXEMPLES DE CE QUI EST INTERDIT (ne JAMAIS inventer) :\n"
+            "   - 'MSc Santé numérique' - N'EXISTE PAS\n"
+            "   - 'Master Informatique médicale' - N'EXISTE PAS\n"
+            "   - 'Informatique pour la Santé' - N'EXISTE PAS\n"
+            "   - 'MSc Ingénierie Informatique' - N'EXISTE PAS\n"
+            "   - Tout nom de formation que tu n'as pas VU dans les données scrapées\n\n"
+            
+            "✅ CE QUE TU DOIS FAIRE :\n"
+            "   - Si les données scrapées sont dans le contexte → cite UNIQUEMENT les formations listées\n"
+            "   - Si tu ne vois PAS de formation correspondant au domaine demandé → dis :\n"
+            "     'Je n'ai pas cette information dans mes données. Je t'invite à consulter epitech.eu/formations'\n"
+            "   - Pour la santé/tech, la vraie formation qui existe est 'MBA Santé, expertises IA & IoT'\n"
+            "   - NE JAMAIS improviser ou inventer un nom de formation\n\n"
+
 
             "### LANGUE\n"
             "Tu réponds UNIQUEMENT en **français**.\n\n"

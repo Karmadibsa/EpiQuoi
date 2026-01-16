@@ -82,12 +82,34 @@ class ToolRouter:
         "grande ecole",
         "grande école",
     )
+    
+    # Domaines d'études - quand l'utilisateur mentionne un domaine, on doit scraper les formations
+    DOMAIN_HINTS = (
+        # Domaines techniques
+        "cyber", "cybersécurité", "sécurité",
+        "data", "données", "big data", "analytics",
+        "intelligence artificielle", "machine learning", "deep learning",
+        "cloud", "web3", "blockchain",
+        "iot", "objets connectés", "robotique",
+        "réalité virtuelle", "vr", "immersif",
+        # Domaines métiers (MBA)
+        "santé", "health", "medtech",
+        "fintech", "finance",
+        "marketing", "influence",
+        "management", "business", "entrepreneuriat",
+        "luxe", "retail",
+        "ressources humaines",
+        # Questions d'orientation
+        "travailler dans", "bosser dans", "faire du", "me spécialiser",
+        "quel domaine", "quels débouchés", "après le diplôme",
+    )
+    
     NEWS_HINTS = ("news", "actualité", "actu", "nouveauté", "événement")
     PEDAGOGY_HINTS = ("méthodologie", "methodologie", "pédagogie", "pedagogie", "pédago", "pedago")
 
     # Thresholds (tuned for "chatty" users)
     THRESH_CAMPUS = 2.0
-    THRESH_DEGREES = 2.0
+    THRESH_DEGREES = 1.5  # Abaissé pour mieux détecter les questions de domaines
     THRESH_NEWS = 2.5
     THRESH_PEDAGOGY = 1.5
 
@@ -138,6 +160,15 @@ class ToolRouter:
         if any(s in lower for s in ("specialisation", "spécialisation", "specialisations", "spécialisations")):
             degrees_score += 1.0
             degrees_reasons.append("+1 specialization question boost")
+        
+        # Domaines d'études mentionnés - l'utilisateur parle d'orientation/carrière
+        domain_mentioned = False
+        for domain in cls.DOMAIN_HINTS:
+            if domain in lower:
+                degrees_score += 1.5  # Fort boost pour les domaines
+                degrees_reasons.append(f"+1.5 domain '{domain}'")
+                domain_mentioned = True
+                break  # Un seul bonus de domaine
 
         if epitech_mentioned:
             degrees_score += 1.0
@@ -162,9 +193,18 @@ class ToolRouter:
                 "msc",
                 "bachelor",
                 "mba",
+                "master",
             )
         )
-        degrees_call = (explicit_tool and degrees_score >= 1.5) or (degrees_topic and degrees_score >= cls.THRESH_DEGREES)
+        
+        # Déclencher le scraping si:
+        # 1. Question explicite sur les formations ET score suffisant
+        # 2. Domaine mentionné (santé, cyber, etc.) - toujours scraper pour avoir les vraies formations
+        degrees_call = (
+            (explicit_tool and degrees_score >= 1.5) 
+            or (degrees_topic and degrees_score >= cls.THRESH_DEGREES)
+            or domain_mentioned  # NOUVEAU: toujours scraper si domaine mentionné
+        )
         decisions["degrees"] = ToolDecision(call=degrees_call, score=degrees_score, reasons=degrees_reasons)
 
         # --- NEWS ---
