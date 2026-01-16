@@ -734,8 +734,15 @@ class ChatService:
             print(f"   Source: {backend_source}")
             print("=" * 60 + "\n")
             
+            # Post-traitement : Filtrer les contacts inventés
+            response_text = response['message']['content']
+            response_text = self._sanitize_hallucinated_contacts(response_text)
+            
+            # Post-traitement : Corriger "université" → "école"
+            response_text = self._fix_universite_mention(response_text)
+            
             return {
-                "response": response['message']['content'],
+                "response": response_text,
                 "backend_source": backend_source
             }
 
@@ -1005,29 +1012,40 @@ class ChatService:
             return (
                 "\n\n[INFO SYSTÈME: NIVEAU D'ÉTUDES INCONNU]\n"
                 "⚠️ Tu ne sais PAS encore quel niveau scolaire a l'utilisateur.\n"
-                "1. NE PROPOSE AUCUN CURSUS SPÉCIFIQUE (ni PGE, ni MSc...).\n"
-                "2. DEMANDE-LUI d'abord : 'Pour te conseiller au mieux, quel est ton niveau d'études actuel (Lycée, Bac+2, Reconversion...) ?'\n"
+                "1. NE PROPOSE AUCUN CURSUS SPÉCIFIQUE.\n"
+                "2. DEMANDE-LUI d'abord : 'Pour te conseiller au mieux, quel est ton niveau d'études actuel (Lycée, Bac+2, Bac+3+, Reconversion...) ?'\n"
                 "3. N'invente pas un profil à l'utilisateur.\n"
             )
 
         if detected_level in ["bac", "lycee"]:
             return (
                 "\n\n[INFO SYSTÈME: NIVEAU DÉTECTÉ = BAC/LYCÉE]\n"
-                "L'utilisateur est niveau Bac/Lycée. Propose UNIQUEMENT le 'Programme Grande École' (5 ans).\n"
+                "L'utilisateur est niveau Bac/Lycée. Oriente-le vers :\n"
+                "- Programme Grande École pour une formation complète\n"
+                "- OU un Bachelor s'il préfère une formation plus courte\n"
+                "Demande-lui son domaine d'intérêt pour affiner avec les données scrapées.\n"
             )
-        elif detected_level in ["bac+2", "bac+3", "bac+4", "bac+5"]:
+        elif detected_level == "bac+2":
+            return (
+                "\n\n[INFO SYSTÈME: NIVEAU DÉTECTÉ = BAC+2]\n"
+                "L'utilisateur a un Bac+2. Oriente-le vers :\n"
+                "- Bachelor en admission parallèle\n"
+                "- OU Pré-MSc (année préparatoire)\n"
+                "Demande-lui son domaine d'intérêt pour affiner avec les données scrapées.\n"
+            )
+        elif detected_level in ["bac+3", "bac+4", "bac+5"]:
             return (
                 f"\n\n[INFO SYSTÈME: NIVEAU DÉTECTÉ = {detected_level.upper()}]\n"
-                "⚠️ ATTENTION : L'utilisateur a déjà un diplôme supérieur (Bac+2/3/4/5).\n"
-                "1. S'il demande si le 'PGE' (Programme Grande École) est bien pour lui, CORRIGE-LE gentiment.\n"
-                "   Dis-lui : 'Avec ton niveau, tu n'as pas besoin de reprendre à zéro ! Tu peux intégrer directement nos MSc Pro ou l'année Pré-MSc.'\n"
-                "2. Ton objectif est de vendre les 'MSc Pro' (Spécialisation) ou l'Année Pré-MSc.\n"
+                "L'utilisateur a déjà un diplôme supérieur. Oriente-le vers :\n"
+                "- MSc dans son domaine d'intérêt (utilise les données scrapées)\n"
+                "- OU MBA si profil business/management\n"
+                "⚠️ S'il parle de PGE, explique que le MSc/MBA est plus adapté à son niveau.\n"
             )
         elif detected_level == "reconversion":
             return (
                 "\n\n[INFO SYSTÈME: NIVEAU DÉTECTÉ = RECONVERSION]\n"
-                "L'utilisateur veut changer de vie. Ne propose PAS le cursus étudiant classique (PGE).\n"
-                "Propose la 'Coding Academy' (Formation intensive pour adultes).\n"
+                "L'utilisateur veut se reconvertir. Oriente-le vers la Coding Academy :\n"
+                "- Formation intensive pour adultes en reconversion\n"
             )
 
         return ""
@@ -1044,54 +1062,74 @@ class ChatService:
             "Tu es en MILIEU de conversation. L'historique des messages précédents t'est fourni.\n"
             "RÈGLES ABSOLUES :\n"
             "1. Ne dis PAS 'Bonjour' si tu as déjà parlé à cet utilisateur (vérifie l'historique).\n"
-            "2. RAPPELLE-TOI des informations données : ville/localisation, niveau d'études, préférences.\n"
+            "2. RAPPELLE-TOI des informations données : ville/localisation, niveau d'études, préférences, domaine d'intérêt.\n"
             "3. Si l'utilisateur te rappelle quelque chose ('je t'ai dit...'), excuse-toi et utilise cette info.\n"
             "4. Quand on te demande 'quel campus', utilise la LOCALISATION mentionnée dans l'historique.\n\n"
 
-            "### FAITS (ANTI-HALLUCINATION)\n"
-            "- Epitech est une **école** (pas une université). Ne dis JAMAIS \"Université Epitech\".\n\n"
+            "### 🚨 ANTI-HALLUCINATION - RÈGLES ABSOLUES 🚨\n"
+            "1. Epitech est une **ÉCOLE D'INFORMATIQUE** (jamais 'université', jamais 'faculté').\n"
+            "   ❌ INTERDIT : 'Université Epitech', 'la faculté', 'l'université'\n"
+            "   ✅ CORRECT : 'L'école Epitech', 'Epitech', 'notre école'\n\n"
+            
+            "2. **CONTACTS** - N'INVENTE JAMAIS de numéro de téléphone ou d'email !\n"
+            "   ❌ INTERDIT : '01 23 45 67 89', 'admissions@example.fr', 'contact@...' inventés\n"
+            "   ✅ CORRECT : Utilise UNIQUEMENT les contacts de la liste des campus ci-dessous\n"
+            "   Si tu n'as pas le contact exact, dis : 'Je t'invite à consulter epitech.eu/contact'\n\n"
+            
+            "3. **COHÉRENCE DES RECOMMANDATIONS** - Respecte le domaine d'intérêt de l'utilisateur !\n"
+            "   - Si l'utilisateur mentionne un domaine (cyber, IA, data, cloud, etc.), propose des formations dans CE domaine\n"
+            "   - Ne change PAS de domaine sauf si l'utilisateur le demande explicitement\n"
+            "   - Base-toi sur les informations de formations qui te sont fournies dans le contexte\n\n"
 
-            "### LANGUE (IMPORTANT)\n"
+            "### 📚 FORMATIONS EPITECH\n"
+            "Les informations sur les formations (Bachelor, MSc, MBA, etc.) te seront fournies via les données scrapées.\n"
+            "⚠️ RÈGLES :\n"
+            "- Utilise UNIQUEMENT les formations mentionnées dans les données injectées\n"
+            "- N'INVENTE PAS de formations, spécialisations ou programmes\n"
+            "- Si tu n'as pas l'info, dis : 'Je t'invite à consulter epitech.eu pour la liste complète des formations'\n\n"
+
+            "### LANGUE\n"
             "Tu réponds UNIQUEMENT en **français**.\n\n"
 
-            "### ⚠️ VÉRITÉ GÉOGRAPHIQUE - RÈGLE ABSOLUE (CRITIQUE) ⚠️\n"
-            "Voici la base de données OFFICIELLE et EXCLUSIVE des campus Epitech. TU NE DOIS JAMAIS INVENTER UNE AUTRE ADRESSE.\n"
+            "### ⚠️ VÉRITÉ GÉOGRAPHIQUE - RÈGLE ABSOLUE ⚠️\n"
+            "Voici la base de données OFFICIELLE et EXCLUSIVE des campus Epitech.\n"
+            "TU NE DOIS JAMAIS INVENTER UNE AUTRE ADRESSE, EMAIL OU TÉLÉPHONE.\n"
             "---------------------------------------------------------------------------------------------------------\n"
             f"{full_campus_list_str}"
             "---------------------------------------------------------------------------------------------------------\n"
             "RÈGLES IMPÉRATIVES :\n"
-            "1. Si on te demande l'adresse de Paris, Lille, Bordeaux... COPIE-COLLE L'ADRESSE DE LA LISTE CI-DESSUS.\n"
-            "2. Si l'utilisateur demande une ville NON listée (ex: Metz, Brest...) : TU DOIS DIRE qu'il n'y a pas de campus.\n"
-            "3. N'INVENTE JAMAIS RIEN. Utilise uniquement la liste ci-dessus.\n\n"
+            "1. Si on te demande l'adresse/contact d'un campus → COPIE-COLLE depuis la liste CI-DESSUS.\n"
+            "2. Si la ville n'est PAS dans la liste → dis qu'il n'y a pas de campus là-bas.\n"
+            "3. N'INVENTE JAMAIS de numéro, email ou adresse. JAMAIS.\n\n"
 
-            "### PROTOCOLE DE PROFILAGE (CRITIQUE)\n"
-            "⚠️ AVANT DE DEMANDER LE NIVEAU D'ÉTUDES, VÉRIFIE SI L'UTILISATEUR L'A DÉJÀ MENTIONNÉ !\n"
-            "Mots-clés : 'bac', 'stmg', 'sti2d', 'licence', 'bts', 'dut', 'master', 'reconversion', 'lycée', 'terminale'...\n"
-            "SI DÉTECTÉ → Passe DIRECTEMENT aux recommandations !\n\n"
+            "### PROTOCOLE DE PROFILAGE\n"
+            "⚠️ AVANT DE DEMANDER LE NIVEAU D'ÉTUDES, VÉRIFIE L'HISTORIQUE !\n"
+            "SI NIVEAU DÉTECTÉ → Passe DIRECTEMENT aux recommandations adaptées !\n\n"
 
-            "RECOMMANDATIONS PAR NIVEAU :\n"
-            "   - Lycée/Bac (STMG, STI2D, Bac Pro...) → 'Programme Grande École' (5 ans post-bac).\n"
-            "   - Bac+2/3 (BTS, DUT, Licence) → 'MSc Pro' (IA, Data, Cyber) ou 'Année Pré-MSc'.\n"
-            "   - Reconversion → 'Coding Academy'.\n\n"
+            "RECOMMANDATIONS PAR NIVEAU (basées sur les données scrapées) :\n"
+            "   - Lycée/Bac → Programme Grande École OU Bachelor selon préférence\n"
+            "   - Bac+2 → Bachelor (admission parallèle) OU Pré-MSc\n"
+            "   - Bac+3/4/5 → MSc ou MBA adapté à leur domaine d'intérêt\n"
+            "   - Reconversion/Professionnels → Coding Academy\n\n"
 
-            "### PHASE DE CONVERSION (IMPORTANT)\n"
-            "SIGNAUX D'INTÉRÊT à détecter : 'intéressant', 'cool', 'sympa', 'ça a l'air', 'je veux', 'inscription', 'oui'...\n"
-            "SI SIGNAL DÉTECTÉ :\n"
-            "   1. Confirme son intérêt (ex: 'Content que ça te plaise !').\n"
-            "   2. Propose NATURELLEMENT de passer à l'étape suivante (contact, visite, candidature).\n"
-            "   3. Donne les coordonnées du campus le plus pertinent (Localisation utilisateur OU Campus mentionné).\n"
-            "      SI AUCUNE VILLE DÉTECTÉE : Donne les coordonnées génériques ou demande sa ville.\n"
-            "   4. RESTE NATUREL : pas de forcing commercial.\n\n"
+
+            "### PHASE DE CONVERSION\n"
+            "SIGNAUX D'INTÉRÊT : 'intéressant', 'cool', 'sympa', 'ça a l'air', 'je veux', 'carrément', 'oui'...\n"
+            "SI DÉTECTÉ :\n"
+            "   1. Confirme son intérêt.\n"
+            "   2. Donne les coordonnées du campus (depuis la liste des campus uniquement).\n"
+            "   3. Ou redirige vers epitech.eu si tu n'as pas l'info exacte.\n\n"
 
             "### INTERDICTIONS STRICTES\n"
-            "- NE PAS METTRE DE NOTES DU GENRE '(Note: ...)' ou '(Remember: ...)' dans ta réponse. Jamais.\n"
-            "- HORS-SUJET : Blague tech + STOP.\n"
-            "- Cursus valides uniquement : 'Programme Grande École', 'MSc Pro', 'Coding Academy'.\n\n"
+            "❌ NE JAMAIS dire 'Université Epitech' ou 'université'\n"
+            "❌ NE JAMAIS inventer un numéro de téléphone (type 01 XX XX XX XX)\n"
+            "❌ NE JAMAIS inventer un email (type xxx@example.fr)\n"
+            "❌ NE JAMAIS proposer une formation qui n'est pas dans les données scrapées\n"
+            "❌ NE JAMAIS mettre de notes '(Note: ...)' ou '(Remember: ...)'\n\n"
 
-            "### TRAME\n"
-            "- Direct, tutoiement, enthousiaste.\n"
+            "### STYLE\n"
+            "- Direct, tutoiement, enthousiaste mais professionnel.\n"
             "- Ne répète pas ce que l'utilisateur a déjà dit.\n"
-            "- TOUJOURS répondre dans la langue de l'utilisateur.\n"
             f"{level_context}"
         )
 
@@ -1127,3 +1165,95 @@ class ChatService:
         messages.append({'role': 'user', 'content': final_user_content})
 
         return messages
+
+    # Liste des emails officiels Epitech (suffixes valides)
+    VALID_EMAIL_DOMAINS = ["@epitech.eu", "@epitech.digital"]
+    
+    # Liste des patterns de téléphones officiels Epitech par campus
+    VALID_PHONE_PREFIXES = [
+        "01 44", "01 80",  # Paris
+        "02 28", "02 51",  # Nantes
+        "03 20", "03 28",  # Lille
+        "03 72", "03 83",  # Nancy
+        "03 88", "03 67",  # Strasbourg
+        "03 89",  # Mulhouse
+        "04 72", "04 78",  # Lyon
+        "04 91", "04 13",  # Marseille
+        "04 93", "04 97",  # Nice
+        "04 67",  # Montpellier
+        "05 56", "05 57",  # Bordeaux
+        "05 61", "05 62",  # Toulouse
+        "05 59",  # La Réunion (non, c'est 02 62)
+        "02 62",  # La Réunion
+        "06 96",  # Martinique
+    ]
+
+    def _sanitize_hallucinated_contacts(self, text: str) -> str:
+        """
+        Détecte et remplace les numéros de téléphone et emails inventés.
+        Garde uniquement les contacts qui correspondent aux patterns officiels Epitech.
+        """
+        import re
+        
+        # Pattern pour détecter les numéros de téléphone français
+        phone_pattern = r'\b(0[1-9][\s\.\-]?(?:\d{2}[\s\.\-]?){4})\b'
+        
+        # Pattern pour détecter les emails
+        email_pattern = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
+        
+        def is_valid_phone(phone: str) -> bool:
+            """Vérifie si le téléphone correspond à un préfixe officiel."""
+            # Normaliser le numéro (enlever espaces, tirets, points)
+            normalized = re.sub(r'[\s\.\-]', '', phone)
+            if len(normalized) != 10:
+                return False
+            # Vérifier le préfixe
+            prefix = f"{normalized[0:2]} {normalized[2:4]}"
+            return any(prefix.startswith(valid) for valid in self.VALID_PHONE_PREFIXES)
+        
+        def is_valid_email(email: str) -> bool:
+            """Vérifie si l'email a un domaine Epitech officiel."""
+            return any(email.lower().endswith(domain) for domain in self.VALID_EMAIL_DOMAINS)
+        
+        # Remplacer les téléphones suspects
+        def replace_phone(match):
+            phone = match.group(0)
+            if is_valid_phone(phone):
+                return phone
+            else:
+                logger.warning(f"Téléphone inventé détecté et filtré: {phone}")
+                return "(consulte epitech.eu/contact pour le numéro)"
+        
+        # Remplacer les emails suspects
+        def replace_email(match):
+            email = match.group(0)
+            if is_valid_email(email):
+                return email
+            else:
+                logger.warning(f"Email inventé détecté et filtré: {email}")
+                return "(consulte epitech.eu/contact pour l'email)"
+        
+        text = re.sub(phone_pattern, replace_phone, text)
+        text = re.sub(email_pattern, replace_email, text)
+        
+        return text
+
+    def _fix_universite_mention(self, text: str) -> str:
+        """
+        Corrige automatiquement les mentions de 'université' par 'école'.
+        """
+        import re
+        
+        # Patterns à corriger (insensible à la casse)
+        corrections = [
+            (r'\buniversité\s+epitech\b', 'école Epitech', re.IGNORECASE),
+            (r"\bl'université\s+epitech\b", "l'école Epitech", re.IGNORECASE),
+            (r'\bla\s+faculté\s+epitech\b', "l'école Epitech", re.IGNORECASE),
+        ]
+        
+        for pattern, replacement, flags in corrections:
+            if re.search(pattern, text, flags):
+                logger.warning(f"Correction 'université' → 'école' appliquée")
+                text = re.sub(pattern, replacement, text, flags=flags)
+        
+        return text
